@@ -16,6 +16,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// Regression test: the endpoint defaults to track-only responses and
+// reports a playing episode with an empty `item` unless the request
+// explicitly asks for episode data via `additional_types`. This was the
+// real root cause behind episodes always appearing not-addable in
+// production — see https://github.com/spotify/web-api/issues/1496.
+describe("getCurrentlyPlaying — request shape", () => {
+  it("requests additional_types=track,episode so episode data is actually returned", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCurrentlyPlaying("token");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe("/v1/me/player/currently-playing");
+    expect(parsed.searchParams.get("additional_types")).toBe("track,episode");
+  });
+});
+
 describe("getCurrentlyPlaying — normalization table", () => {
   it("204 No Content (nothing active) normalizes to { track: null, episode: null }", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));

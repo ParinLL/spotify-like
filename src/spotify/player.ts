@@ -13,7 +13,16 @@ import {
   type TrackInfo,
 } from "../types";
 
-const CURRENTLY_PLAYING_URL = "https://api.spotify.com/v1/me/player/currently-playing";
+// `additional_types=track,episode` is required to get a populated `item`
+// when a podcast episode is playing. Spotify's `currently-playing`
+// endpoint defaults to track-only responses; without this parameter, an
+// episode is reported with `item: null` regardless of what's actually
+// playing (a long-standing, documented API behavior — see
+// https://github.com/spotify/web-api/issues/1496). This was the real root
+// cause of episodes always appearing not-addable in production: the
+// endpoint was never asked for episode data in the first place.
+const CURRENTLY_PLAYING_URL =
+  "https://api.spotify.com/v1/me/player/currently-playing?additional_types=track,episode";
 
 const NO_TRACK_TYPES = new Set(["ad", "unknown"]);
 
