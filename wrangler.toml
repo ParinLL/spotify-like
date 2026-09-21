@@ -1,0 +1,16 @@
+name = "spotify-like-action-button"
+main = "src/index.ts"
+compatibility_date = "2024-11-11"
+
+# Secrets (SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
+# SHORTCUT_SECRET) are set via `wrangler secret put <NAME>` and are not
+# declared here.
+
+[[kv_namespaces]]
+binding = "TOKEN_KV"
+# Placeholder — replace with the id printed by `wrangler kv namespace create`
+# before running a real `wrangler deploy` (see README.md for the full
+# setup procedure). `wrangler dev` and the test suite (vitest.config.ts
+# points at this same file) use Wrangler's local KV simulation
+# automatically and do not validate this id against a real namespace.
+id = "4223cc84f0b74c15bd5a30967fff7abd"

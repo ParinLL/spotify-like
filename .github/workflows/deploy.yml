@@ -1,0 +1,52 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npx vitest --run
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Scan for committed secrets
+        run: npm run scan-secrets
+
+      # 僅在推送到 main 時部署。
+      # pull_request 事件只跑上面的測試——否則任何 PR 都會把該分支的程式碼
+      # 部署到正式 Worker。
+      - name: Deploy to Cloudflare Workers
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # 鎖定與 package.json devDependencies 一致的版本，避免 CI 部署用的
+          # wrangler 跟本機/測試安裝的版本產生落差。升級時三處一起改：
+          # package.json 的 wrangler、@cloudflare/vitest-pool-workers（測試
+          # 內部仍會用它自己巢狀鎖定的版本，無法強制一致，屬已知限制），以及此處。
+          wranglerVersion: '4.135.0'
+          command: deploy

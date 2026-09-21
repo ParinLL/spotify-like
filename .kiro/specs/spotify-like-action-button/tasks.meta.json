@@ -1,0 +1,565 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Create the Wrangler + TypeScript Worker project": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721569
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971734491
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971912227
+      }
+    ],
+    "1.2 Set up the test harness": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721666
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971916483
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972563210
+      }
+    ],
+    "1.3 Define core types and the Result helpers": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721723
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972567462
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972637468
+      }
+    ],
+    "1.4 Build the fake Spotify test harness": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721763
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972642876
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972891064
+      }
+    ],
+    "2.1 Implement the message catalog": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721794
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972643597
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972892752
+      }
+    ],
+    "2.2 Write property test for the success message template": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721840
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973102960
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973337883
+      }
+    ],
+    "2.3 Implement outcome classification and the status code map": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721880
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972914259
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973097224
+      }
+    ],
+    "2.4 Write unit tests for the classification mapping": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721952
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973371095
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973661369
+      }
+    ],
+    "3.1 Implement the shared-secret gate": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971721984
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972644319
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972892052
+      }
+    ],
+    "3.2 Write unit tests for the gate": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722024
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973103498
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973338519
+      }
+    ],
+    "4.1 Implement the no-throw fetch wrapper": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722106
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972645048
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972893844
+      }
+    ],
+    "4.2 Write unit tests for the call wrapper": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722141
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973104247
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973339603
+      }
+    ],
+    "5.1 Implement the refresh-token grant": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722178
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972914850
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973095729
+      }
+    ],
+    "5.2 Write property test for the token exchange": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722217
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973372213
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973659108
+      }
+    ],
+    "5.3 Write unit tests for the token cache": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722255
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973372933
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973659185
+      }
+    ],
+    "6.1 Implement currently-playing normalization": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722284
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972916038
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973094734
+      }
+    ],
+    "6.2 Write unit tests for the normalization table": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722328
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973374098
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973659755
+      }
+    ],
+    "7.1 Implement the saved-tracks module": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722365
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972916739
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973096484
+      }
+    ],
+    "7.2 Write unit tests for the library module": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722401
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973374601
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973660859
+      }
+    ],
+    "8. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722441
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973689518
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973690019
+      }
+    ],
+    "9.1 Implement the `likeCurrentTrack` orchestration": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722483
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973707626
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973783852
+      }
+    ],
+    "9.2 Implement the stale-token retry": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722523
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973795563
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973920128
+      }
+    ],
+    "9.3 Wire the `fetch` handler and response shaping": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722558
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973930005
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789974092943
+      }
+    ],
+    "9.4 Add secret binding validation": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722592
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973708262
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973783957
+      }
+    ],
+    "10.9 Write property test for secret containment": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722638
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789974109294
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789974238430
+      }
+    ],
+    "11.1 Implement `scripts/get-refresh-token.ts`": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722679
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972646166
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972894587
+      }
+    ],
+    "12.1 Write the setup and deploy README": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722748
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972646849
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972979078
+      }
+    ],
+    "12.2 Add the credential scanning script": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722814
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973105122
+      },
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973340166
+      }
+    ],
+    "13. Final checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789971722866
+      }
+    ],
+    "1. Project scaffolding and test harness": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972891146
+      }
+    ],
+    "11. One-time refresh-token helper script": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789972894649
+      }
+    ],
+    "3. Shared-secret gate": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973338617
+      }
+    ],
+    "4. Spotify HTTP call wrapper": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973339659
+      }
+    ],
+    "12. Setup documentation and credential scanning": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973340197
+      }
+    ],
+    "5. Token exchange with in-isolate cache": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973659223
+      }
+    ],
+    "6. Playback normalization": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973659796
+      }
+    ],
+    "7. Add-only library writes": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973660920
+      }
+    ],
+    "2. Message catalog and outcome classification": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789973661403
+      }
+    ],
+    "9. Orchestration and request handler": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789974093020
+      }
+    ],
+    "10. End-to-end property and smoke tests": [
+      {
+        "executionId": "52046afc-427a-4f2a-9b33-40fab6aeb21c",
+        "chatSessionId": "sess_284f358b-dedc-4417-a237-06ff4a92c5a7",
+        "timestamp": 1789974238538
+      }
+    ]
+  }
+}

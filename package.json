@@ -1,0 +1,30 @@
+{
+  "name": "spotify-like-action-button",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker that saves the currently playing Spotify track to Liked Songs on an iPhone Action Button press.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "scan-secrets": "bash scripts/scan-secrets.sh"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260921.1",
+    "@types/node": "^22.20.4",
+    "fast-check": "^4.10.2",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.135.0"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true,
+    "sharp@0.35.4": true,
+    "workerd@1.20260815.1": true,
+    "workerd@1.20260918.1": true,
+    "esbuild@0.28.1": true
+  }
+}
