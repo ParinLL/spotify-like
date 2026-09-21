@@ -3,6 +3,16 @@
 // a Result rather than throwing, so this function has one exit shape and
 // classify() is the single place a Failure becomes a user-visible Outcome.
 //
+// A currently-playing item is exactly one of: a track, an addable episode
+// (has an id), a not-addable episode (no id — Spotify reported it without
+// a full item object), a not-addable track (local file, no id), or
+// nothing. Tracks and episodes are kept as separate outcomes
+// ("added" / "episode_added") with their own message templates, since a
+// podcast episode's "name" is the episode title and its "show" is the
+// podcast name — different fields from a track's name/artist, and worth
+// distinguishing in the notification. Local files remain "not_addable"
+// unconditionally; that case is intentionally not extended here.
+//
 // Stale-token retry (task 9.2, design.md's "Stale-token retry" paragraph):
 // if a data call (currently-playing or save) returns a 401 while using a
 // cached token, invalidate the cache, re-exchange once, and retry that call
@@ -12,7 +22,7 @@
 
 import { getAccessToken, invalidateAccessToken } from "./spotify/token";
 import { getCurrentlyPlaying } from "./spotify/player";
-import { saveTrack, trackUriFromId } from "./spotify/library";
+import { saveTrack, trackUriFromId, episodeUriFromId } from "./spotify/library";
 import { classify } from "./outcome";
 import { err, type Env, type Failure, type Outcome, type Result } from "./types";
 
@@ -66,16 +76,35 @@ export async function likeCurrentTrack(env: Env): Promise<Outcome> {
     if (!playback.ok) return classify(playback.error, "data");
   }
 
-  const track = playback.value.track;
-  if (track === null) return { kind: "nothing_playing" };
-  if (track.id === null) return { kind: "not_addable" };
+  const { track, episode } = playback.value;
 
-  const trackUri = trackUriFromId(track.id);
-  let saved = await saveTrack(accessToken, trackUri);
-  if (!saved.ok) {
-    saved = await withStaleTokenRetry(env, saved, (freshToken) => saveTrack(freshToken, trackUri));
-    if (!saved.ok) return classify(saved.error, "data");
+  if (track !== null) {
+    if (track.id === null) return { kind: "not_addable" };
+
+    const trackUri = trackUriFromId(track.id);
+    let saved = await saveTrack(accessToken, trackUri);
+    if (!saved.ok) {
+      saved = await withStaleTokenRetry(env, saved, (freshToken) => saveTrack(freshToken, trackUri));
+      if (!saved.ok) return classify(saved.error, "data");
+    }
+
+    return { kind: "added", track, rotationFailed: rotationFailed || undefined };
   }
 
-  return { kind: "added", track, rotationFailed: rotationFailed || undefined };
+  if (episode !== null) {
+    if (episode.id === null) return { kind: "not_addable" };
+
+    const episodeUri = episodeUriFromId(episode.id);
+    let saved = await saveTrack(accessToken, episodeUri);
+    if (!saved.ok) {
+      saved = await withStaleTokenRetry(env, saved, (freshToken) =>
+        saveTrack(freshToken, episodeUri),
+      );
+      if (!saved.ok) return classify(saved.error, "data");
+    }
+
+    return { kind: "episode_added", episode, rotationFailed: rotationFailed || undefined };
+  }
+
+  return { kind: "nothing_playing" };
 }

@@ -4,20 +4,21 @@
 // collection so tests can assert that a given message is a member of it
 // (Requirement 4.1 / Property 9).
 //
-// The success case has no fixed string — it is a template instantiated with
-// the track's name and artist — so it gets a formatter instead of a catalog
-// entry.
+// The two success cases ("added", "episode_added") have no fixed string —
+// each is a template instantiated with the added item's fields — so they
+// get formatters instead of catalog entries.
 
 import type { Outcome } from "./types";
 
 /**
  * Outcome kinds that carry a fixed Chinese message. This excludes "added"
- * (templated, see formatAddedMessage) and the two routing outcomes
- * "not_found" and "method_not_allowed", which are not part of this table.
+ * and "episode_added" (both templated, see the formatters below) and the
+ * two routing outcomes "not_found" and "method_not_allowed", which are not
+ * part of this table.
  */
 type MessageOutcomeKind = Exclude<
   Outcome["kind"],
-  "added" | "not_found" | "method_not_allowed"
+  "added" | "episode_added" | "not_found" | "method_not_allowed"
 >;
 
 export const MESSAGES: Record<MessageOutcomeKind, string> = {
@@ -53,5 +54,23 @@ export function formatAddedMessage(
   options?: { rotationFailed?: boolean },
 ): string {
   const base = `已加入喜愛：${track.name} - ${track.artist}`;
+  return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX}` : base;
+}
+
+/**
+ * Formats the success message for an added podcast episode:
+ * `已加入喜愛：<節目名稱> - <單集標題>`
+ *
+ * Same "<A> - <B>" template as formatAddedMessage, but A/B are the show
+ * name and the episode title rather than a track's name and artist —
+ * episodes and tracks are deliberately kept as separate outcomes
+ * (`episode_added` vs `added`), so this is a distinct formatter rather than
+ * a generic one shared between the two.
+ */
+export function formatEpisodeAddedMessage(
+  episode: { name: string; show: string },
+  options?: { rotationFailed?: boolean },
+): string {
+  const base = `已加入喜愛：${episode.show} - ${episode.name}`;
   return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX}` : base;
 }

@@ -15,7 +15,7 @@ import { isAuthorizedCaller } from "./gate";
 import { validateConfig } from "./config";
 import { likeCurrentTrack } from "./like";
 import { classify, httpStatusForOutcome } from "./outcome";
-import { formatAddedMessage, MESSAGES } from "./messages";
+import { formatAddedMessage, formatEpisodeAddedMessage, MESSAGES } from "./messages";
 import type { Env, Outcome } from "./types";
 
 /** Fixed messages for the two routing outcomes, which never reach the Shortcut in normal operation and so have no entry in the Traditional Chinese catalog. */
@@ -27,6 +27,7 @@ const ROUTING_MESSAGES: Record<"not_found" | "method_not_allowed", string> = {
 /** Outcome kinds that are normal (non-failure) business results. */
 const SUCCESS_KINDS: ReadonlySet<Outcome["kind"]> = new Set([
   "added",
+  "episode_added",
   "nothing_playing",
   "not_addable",
 ]);
@@ -34,8 +35,9 @@ const SUCCESS_KINDS: ReadonlySet<Outcome["kind"]> = new Set([
 /**
  * Builds the JSON Response for a given Outcome, per design.md's Endpoint
  * Contract: always `application/json`, always a non-empty `message`, plus
- * `ok`, `outcome`, and — for a successful add — `track` (name/artist only;
- * the internal `id` field never appears in the response body).
+ * `ok`, `outcome`, and — for a successful add — `track` or `episode`
+ * (name/artist or show/name only; the internal `id` field never appears in
+ * the response body).
  *
  * Logs only `{outcome, status}`. Never the request, headers, body, or any
  * secret/token value.
@@ -52,6 +54,9 @@ function respond(outcome: Outcome): Response {
   if (outcome.kind === "added") {
     body.track = { name: outcome.track.name, artist: outcome.track.artist };
   }
+  if (outcome.kind === "episode_added") {
+    body.episode = { name: outcome.episode.name, show: outcome.episode.show };
+  }
 
   console.log(JSON.stringify({ outcome: outcome.kind, status }));
 
@@ -64,6 +69,9 @@ function respond(outcome: Outcome): Response {
 function messageFor(outcome: Outcome): string {
   if (outcome.kind === "added") {
     return formatAddedMessage(outcome.track, { rotationFailed: outcome.rotationFailed });
+  }
+  if (outcome.kind === "episode_added") {
+    return formatEpisodeAddedMessage(outcome.episode, { rotationFailed: outcome.rotationFailed });
   }
   if (outcome.kind === "not_found" || outcome.kind === "method_not_allowed") {
     return ROUTING_MESSAGES[outcome.kind];

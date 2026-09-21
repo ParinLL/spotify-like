@@ -8,7 +8,7 @@
 // Task 7.2. Validates: Requirements 2.1, 2.2, 3.5
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isTrackSaved, saveTrack, trackUriFromId } from "../../src/spotify/library";
+import { episodeUriFromId, isTrackSaved, saveTrack, trackUriFromId } from "../../src/spotify/library";
 import * as library from "../../src/spotify/library";
 
 function jsonResponse(status: number, body?: unknown): Response {
@@ -22,6 +22,27 @@ afterEach(() => {
 describe("trackUriFromId", () => {
   it("produces spotify:track:<id>", () => {
     expect(trackUriFromId("abc123")).toBe("spotify:track:abc123");
+  });
+});
+
+describe("episodeUriFromId", () => {
+  it("produces spotify:episode:<id>", () => {
+    expect(episodeUriFromId("ep123")).toBe("spotify:episode:ep123");
+  });
+
+  it("can be saved through the same saveTrack PUT call as a track URI", async () => {
+    // /me/library accepts episode URIs through the same PUT call — no
+    // separate endpoint or function is needed for episodes.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const episodeUri = episodeUriFromId("ep123");
+    const result = await saveTrack("token-xyz", episodeUri);
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`https://api.spotify.com/v1/me/library?uris=${encodeURIComponent(episodeUri)}`);
+    expect(init.method).toBe("PUT");
   });
 });
 
@@ -120,7 +141,12 @@ describe("isTrackSaved", () => {
 describe("module export surface", () => {
   it("exports no DELETE-issuing function (add-only)", () => {
     const exportNames = Object.keys(library);
-    expect(exportNames).toEqual(["trackUriFromId", "saveTrack", "isTrackSaved"]);
+    expect(exportNames).toEqual([
+      "trackUriFromId",
+      "episodeUriFromId",
+      "saveTrack",
+      "isTrackSaved",
+    ]);
     for (const name of exportNames) {
       expect(name.toLowerCase()).not.toContain("delete");
       expect(name.toLowerCase()).not.toContain("remove");

@@ -3,6 +3,11 @@
 // `/me/tracks/contains` are deprecated and never used here. See design.md,
 // "spotify/library.ts — add-only writes".
 //
+// `/me/library` accepts Spotify URIs for several item types (tracks,
+// episodes, shows, albums, ...), not just tracks — saveTrack() is generic
+// over the URI, so the same PUT call saves either a track or an episode
+// depending on which URI-building helper the caller uses.
+//
 // This module exports no DELETE path. The absence of a remove function is
 // the enforcement mechanism for "add-only" (Requirement 2.3).
 
@@ -14,6 +19,10 @@ const LIBRARY_CONTAINS_URL = "https://api.spotify.com/v1/me/library/contains";
 
 export function trackUriFromId(trackId: string): string {
   return `spotify:track:${trackId}`;
+}
+
+export function episodeUriFromId(episodeId: string): string {
+  return `spotify:episode:${episodeId}`;
 }
 
 export function saveTrack(token: string, trackUri: string): Promise<Result<Response, Failure>> {

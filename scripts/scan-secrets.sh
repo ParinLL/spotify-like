@@ -48,11 +48,14 @@ fi
 
 # --- Check 2: credential-shaped literals in tracked files -------------------
 # Build the list of tracked files to scan, excluding this script itself
-# (it legitimately mentions secret key names) and the documented example
-# file (which intentionally lists the keys with empty values).
+# (it legitimately mentions secret key names), its own regression test
+# (which deliberately plants fake credential literals to exercise
+# detection), and the documented example file (which intentionally lists
+# the keys with empty values).
 mapfile -d '' -t tracked_files < <(
   git ls-files -z -- \
     ':!:scripts/scan-secrets.sh' \
+    ':!:scripts/__tests__/scan-secrets.test.mjs' \
     ':!:.dev.vars.example'
 )
 

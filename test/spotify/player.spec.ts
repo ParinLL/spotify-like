@@ -1,6 +1,7 @@
 // Unit tests for currently-playing normalization (src/spotify/player.ts).
 // One case per row of the response table in design.md,
-// "spotify/player.ts — reading playback".
+// "spotify/player.ts — reading playback", plus the episode-specific
+// normalization added when episode support was introduced.
 //
 // Task 6.2. Validates: Requirements 1.1, 1.4
 
@@ -16,31 +17,31 @@ afterEach(() => {
 });
 
 describe("getCurrentlyPlaying — normalization table", () => {
-  it("204 No Content (nothing active) normalizes to { track: null }", async () => {
+  it("204 No Content (nothing active) normalizes to { track: null, episode: null }", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
 
     const result = await getCurrentlyPlaying("token");
 
-    expect(result).toEqual({ ok: true, value: { track: null } });
+    expect(result).toEqual({ ok: true, value: { track: null, episode: null } });
   });
 
-  it("200 with an empty body normalizes to { track: null }", async () => {
+  it("200 with an empty body normalizes to { track: null, episode: null }", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 200 })));
 
     const result = await getCurrentlyPlaying("token");
 
-    expect(result).toEqual({ ok: true, value: { track: null } });
+    expect(result).toEqual({ ok: true, value: { track: null, episode: null } });
   });
 
-  it("200 with item: null normalizes to { track: null }", async () => {
+  it("200 with item: null normalizes to { track: null, episode: null }", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, { item: null })));
 
     const result = await getCurrentlyPlaying("token");
 
-    expect(result).toEqual({ ok: true, value: { track: null } });
+    expect(result).toEqual({ ok: true, value: { track: null, episode: null } });
   });
 
-  it("200 with currently_playing_type: 'ad' normalizes to { track: null }", async () => {
+  it("200 with currently_playing_type: 'ad' normalizes to { track: null, episode: null }", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -53,10 +54,10 @@ describe("getCurrentlyPlaying — normalization table", () => {
 
     const result = await getCurrentlyPlaying("token");
 
-    expect(result).toEqual({ ok: true, value: { track: null } });
+    expect(result).toEqual({ ok: true, value: { track: null, episode: null } });
   });
 
-  it("200 with currently_playing_type: 'unknown' normalizes to { track: null }", async () => {
+  it("200 with currently_playing_type: 'unknown' normalizes to { track: null, episode: null }", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -69,15 +70,19 @@ describe("getCurrentlyPlaying — normalization table", () => {
 
     const result = await getCurrentlyPlaying("token");
 
-    expect(result).toEqual({ ok: true, value: { track: null } });
+    expect(result).toEqual({ ok: true, value: { track: null, episode: null } });
   });
 
-  it("200 with currently_playing_type: 'episode' normalizes to a track with id: null, not { track: null }", async () => {
+  it("200 with currently_playing_type: 'episode' normalizes to an episode with the show name, not { track, episode: null }", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
         jsonResponse(200, {
-          item: { id: "ep1", name: "Episode", artists: [{ name: "Show" }] },
+          item: {
+            id: "ep1",
+            name: "Episode Title",
+            show: { name: "The Show" },
+          },
           currently_playing_type: "episode",
         }),
       ),
@@ -87,11 +92,14 @@ describe("getCurrentlyPlaying — normalization table", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // An episode still yields a track object — it must not collapse into
-    // the "nothing playing" case, even though its id is not addable.
-    expect(result.value.track).not.toBeNull();
-    expect(result.value.track?.id).toBeNull();
-    expect(result.value).toEqual({ track: { id: null, name: "Episode", artist: "Show" } });
+    // An episode is reported through `episode`, never `track` — it must
+    // not collapse into "nothing playing" or get treated as a track.
+    expect(result.value.track).toBeNull();
+    expect(result.value.episode).not.toBeNull();
+    expect(result.value).toEqual({
+      track: null,
+      episode: { id: "ep1", name: "Episode Title", show: "The Show" },
+    });
   });
 
   it("200 track with id: null (local file) normalizes to a track with id: null", async () => {
@@ -109,7 +117,10 @@ describe("getCurrentlyPlaying — normalization table", () => {
 
     expect(result).toEqual({
       ok: true,
-      value: { track: { id: null, name: "Local File", artist: "Unknown" } },
+      value: {
+        track: { id: null, name: "Local File", artist: "Unknown" },
+        episode: null,
+      },
     });
   });
 
@@ -129,7 +140,10 @@ describe("getCurrentlyPlaying — normalization table", () => {
 
     expect(result).toEqual({
       ok: true,
-      value: { track: { id: "track1", name: "Song", artist: "Artist" } },
+      value: {
+        track: { id: "track1", name: "Song", artist: "Artist" },
+        episode: null,
+      },
     });
   });
 
@@ -137,13 +151,16 @@ describe("getCurrentlyPlaying — normalization table", () => {
   // with `item: null` (no full item object at all), not just `item: {...}`
   // with `currently_playing_type: "episode"`. This combination was
   // observed against the real Spotify API in production and was
-  // misclassified as `{track: null}` ("nothing playing") instead of
-  // `not_addable`, because the `item === null` early-return in
-  // getCurrentlyPlaying ran before the `currently_playing_type === "episode"`
-  // check. The fix moves the episode check first, so this must return a
-  // track object (not null), even though `item` itself is null and the
-  // resulting name/artist fall back to empty strings.
-  it("200 with item: null AND currently_playing_type: 'episode' still yields a not-addable track, not { track: null }", async () => {
+  // originally misclassified as `{track: null}` ("nothing playing")
+  // instead of surfacing as a (not-addable) episode, because the
+  // `item === null` early-return in getCurrentlyPlaying ran before the
+  // `currently_playing_type === "episode"` check. The episode check now
+  // runs first and always returns an `episode` value (never null) for this
+  // type, even when `item` itself is null and the resulting name/show
+  // fall back to empty strings; `episode.id` is null in that case, which
+  // the orchestration layer (like.ts) treats as not-addable, same as a
+  // local file.
+  it("200 with item: null AND currently_playing_type: 'episode' still yields an episode with id: null, not { episode: null }", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -163,9 +180,13 @@ describe("getCurrentlyPlaying — normalization table", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.track).not.toBeNull();
-    expect(result.value.track?.id).toBeNull();
-    expect(result.value).toEqual({ track: { id: null, name: "", artist: "" } });
+    expect(result.value.track).toBeNull();
+    expect(result.value.episode).not.toBeNull();
+    expect(result.value.episode?.id).toBeNull();
+    expect(result.value).toEqual({
+      track: null,
+      episode: { id: null, name: "", show: "" },
+    });
   });
 });
 
@@ -185,7 +206,10 @@ describe("getCurrentlyPlaying — artist extraction edge cases", () => {
 
     expect(result).toEqual({
       ok: true,
-      value: { track: { id: "track1", name: "Song", artist: "" } },
+      value: {
+        track: { id: "track1", name: "Song", artist: "" },
+        episode: null,
+      },
     });
   });
 
@@ -204,7 +228,56 @@ describe("getCurrentlyPlaying — artist extraction edge cases", () => {
 
     expect(result).toEqual({
       ok: true,
-      value: { track: { id: "track1", name: "Song", artist: "" } },
+      value: {
+        track: { id: "track1", name: "Song", artist: "" },
+        episode: null,
+      },
+    });
+  });
+});
+
+describe("getCurrentlyPlaying — episode show-name extraction edge cases", () => {
+  it("falls back to an empty show name when `show` is absent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          item: { id: "ep1", name: "Episode Title" },
+          currently_playing_type: "episode",
+        }),
+      ),
+    );
+
+    const result = await getCurrentlyPlaying("token");
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        track: null,
+        episode: { id: "ep1", name: "Episode Title", show: "" },
+      },
+    });
+  });
+
+  it("falls back to an empty show name when `show.name` is not a string", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          item: { id: "ep1", name: "Episode Title", show: { name: null } },
+          currently_playing_type: "episode",
+        }),
+      ),
+    );
+
+    const result = await getCurrentlyPlaying("token");
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        track: null,
+        episode: { id: "ep1", name: "Episode Title", show: "" },
+      },
     });
   });
 });

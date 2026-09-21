@@ -105,4 +105,36 @@ describe("fetch handler wiring", () => {
     });
     expect(fake.library.has("spotify:track:track123")).toBe(true);
   });
+
+  it("returns 200 with the episode_added message for a playing podcast episode", async () => {
+    const fake = createFakeSpotify();
+    vi.stubGlobal("fetch", fake.fetch);
+    fake.scriptCurrentlyPlaying({
+      status: 200,
+      body: {
+        item: { id: "ep123", name: "Episode Title", show: { name: "The Show" } },
+        currently_playing_type: "episode",
+        is_playing: true,
+      },
+    });
+
+    const request = new IncomingRequest("http://example.com/like", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SHORTCUT_SECRET}` },
+    });
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(request, testEnv(), ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json).toEqual({
+      message: "已加入喜愛：The Show - Episode Title",
+      ok: true,
+      outcome: "episode_added",
+      episode: { name: "Episode Title", show: "The Show" },
+    });
+    expect(fake.library.has("spotify:episode:ep123")).toBe(true);
+  });
 });

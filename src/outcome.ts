@@ -68,6 +68,7 @@ export function classify(failure: Failure, site: CallSite): Outcome {
  */
 export const OUTCOME_STATUS: Record<Outcome["kind"], number> = {
   added: 200,
+  episode_added: 200,
   nothing_playing: 200,
   not_addable: 200,
   auth_failed: 200,

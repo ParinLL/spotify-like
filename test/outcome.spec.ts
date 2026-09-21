@@ -85,6 +85,7 @@ describe("classify", () => {
 describe("httpStatusForOutcome / OUTCOME_STATUS", () => {
   it.each<[Outcome, number]>([
     [{ kind: "added", track: { id: "1", name: "n", artist: "a" } }, 200],
+    [{ kind: "episode_added", episode: { id: "1", name: "n", show: "s" } }, 200],
     [{ kind: "nothing_playing" }, 200],
     [{ kind: "not_addable" }, 200],
     [{ kind: "auth_failed" }, 200],
@@ -101,6 +102,7 @@ describe("httpStatusForOutcome / OUTCOME_STATUS", () => {
   it("exposes the same table directly via OUTCOME_STATUS", () => {
     expect(OUTCOME_STATUS).toEqual({
       added: 200,
+      episode_added: 200,
       nothing_playing: 200,
       not_addable: 200,
       auth_failed: 200,
