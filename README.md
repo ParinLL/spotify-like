@@ -2,10 +2,12 @@
 
 [中文版 (Traditional Chinese)](README.zh-TW.md)
 
-A Cloudflare Worker that turns one iPhone Action Button press into "save the
-currently playing Spotify track to Liked Songs", with a Traditional Chinese
-notification for the result. See `.kiro/specs/spotify-like-action-button/`
-for the requirements and design behind this Worker.
+A Cloudflare Worker that saves the currently playing Spotify track (or
+podcast episode) to Liked Songs in one tap, with a Traditional Chinese
+notification for the result. The trigger is not limited to the iPhone Action
+Button — any way of running an iOS Shortcut works; see "Triggering it" below.
+See `.kiro/specs/spotify-like-action-button/` for the requirements and design
+behind this Worker.
 
 This README is the one-time setup procedure: registering a Spotify app,
 obtaining a refresh token, deploying the Worker, and wiring the Shortcut.
@@ -19,7 +21,7 @@ Only the **Web API** (REST endpoints: token exchange, currently-playing, library
 - A Spotify account (Free or Premium) whose library the button should modify.
 - Node.js and this repo installed (`npm install`).
 - The Wrangler CLI logged in to your Cloudflare account (`npx wrangler login`).
-- An iPhone with the Shortcuts app and a programmable Action Button (iPhone 15 Pro or newer).
+- An iPhone with the Shortcuts app. An Action Button is not required — it's just one of several triggers (see step 5).
 
 ## 1. Register a Spotify application
 
@@ -145,31 +147,71 @@ no real Cloudflare KV namespace id required.
 
 ## 5. Configure the Shortcut
 
-In the iOS Shortcuts app, create a new shortcut with two actions:
+In the iOS Shortcuts app, create a new shortcut with **three** actions, in order:
 
 1. **Get Contents of URL**
    - URL: `https://<worker-name>.<subdomain>.workers.dev/like`
    - Method: `POST`
-   - Headers: add one header — `Authorization` = `Bearer <SHORTCUT_SECRET>` (the same value you set in step 4)
-   - Request Body: none
-2. **Show Notification**
-   - Body: tap the field → **Select Variable** → **Get Dictionary Value** → key `message`, reading from the previous action's result (the JSON the Worker returns).
+   - Headers: add one — key `Authorization`, value `Bearer <SHORTCUT_SECRET>`
+     (one space after `Bearer`; same value you set in step 4)
+   - Request Body: **None** (do not leave it on the default JSON)
+2. **Get Dictionary Value**
+   - Get: `Value`
+   - Key: `message`
+   - Input is wired to the previous action's result automatically
+3. **Show Notification**
+   - Body: use the **Dictionary Value** variable from step 2 (not the whole
+     "Contents of URL", which would render the raw JSON)
+   - Title: leave empty
+   - Attachment: **clear it** (remove "Contents of URL" if it was prefilled,
+     otherwise the notification carries a redundant JSON attachment)
 
-### Bind it to the Action Button
+Without action 2, the notification shows the whole
+`{"message":"...","ok":true,"outcome":"added",...}` string instead of just the
+Chinese sentence.
 
-**Settings → Action Button → Shortcut**, then select this shortcut.
+### Triggering it (pick any — an Action Button is optional)
+
+What matters is having a fast way to run the shortcut. The Action Button is
+just the most convenient one:
+
+| Trigger | Where to set it | Notes |
+|---|---|---|
+| **iPhone Action Button** | Settings → Action Button → Shortcut | iPhone 15 Pro or newer |
+| **Apple Watch Ultra Action Button** | On the watch: Settings → Action Button → Shortcut; or iPhone's Watch app → Action Button | Ultra / Ultra 2. Most natural while listening |
+| **Control Center** | Edit Control Center → add a Shortcuts control | iOS 18+ |
+| **Lock Screen / Home Screen** | Shortcuts app → long-press the shortcut → Add to Home Screen; or a Lock Screen widget | Any model |
+| **Back Tap** | Settings → Accessibility → Touch → Back Tap → Double/Triple Tap | Any model, uses no button |
+| **Siri** | Just say the shortcut's name (e.g. "Spotify-like") | Works from Apple Watch / AirPods too |
+| **Shortcuts app on Apple Watch** | Open Shortcuts on the watch and tap it; or add it as a watch face complication | Not Ultra-specific |
+
+Running it from an Apple Watch works fine — the shortcut only uses "Get
+Contents of URL", which watchOS supports. With LTE or Wi-Fi the watch runs it
+independently; otherwise it goes through the paired iPhone.
+
+(The `action-button` in this project's name reflects the original use case,
+not a requirement.)
 
 ## 6. Verify
 
-With a track playing, press the Action Button. Expected banner:
+With a track playing, run the shortcut (via any trigger above). Expected banner:
 
 ```
 已加入喜愛：<歌名> - <歌手>
 ```
 
-Also try it with playback stopped (expect `目前沒有播放中的歌曲`) and with a
-podcast episode playing (expect `目前播放的內容無法加入喜愛`), to confirm all
-three common outcomes render correctly.
+Try a few playback states to confirm all four outcomes render correctly:
+
+| What's playing | Expected notification |
+|---|---|
+| A normal track | `已加入喜愛：<歌名> - <歌手>` |
+| A podcast episode | `已加入喜愛：<節目名稱> - <單集標題>` |
+| Nothing | `目前沒有播放中的歌曲` |
+| A local file | `目前播放的內容無法加入喜愛` |
+
+A podcast can also land on "not addable" — when Spotify returns the episode
+without a full item object (`item: null`) there is no episode id to save. That
+is a Spotify-side condition; retrying usually succeeds.
 
 **If iOS shows a generic "The action failed" / "Could not run shortcut"
 dialog instead of a Chinese notification**, the `Authorization` header is

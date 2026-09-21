@@ -1,6 +1,6 @@
 # Spotify Like Action Button
 
-一個 Cloudflare Worker：iPhone 動作按鈕按一下，就把 Spotify 目前播放的歌曲加入「已收藏的歌曲」，並用中文通知回報結果。詳細需求與設計請見
+一個 Cloudflare Worker：一鍵把 Spotify 目前播放的歌曲（或 podcast 單集）加入「已收藏的歌曲」，並用中文通知回報結果。觸發方式不限於 iPhone 動作按鈕——任何能執行 iOS 捷徑的入口都可以，詳見下方「觸發方式」。詳細需求與設計請見
 `.kiro/specs/spotify-like-action-button/`。
 
 本文件是一次性設定流程：註冊 Spotify 應用程式、取得 refresh token、部署 Worker，
@@ -16,7 +16,7 @@
 - 一個 Spotify 帳號（免費或付費皆可），按鈕會修改該帳號的收藏庫。
 - 已安裝 Node.js 並取得本專案原始碼（`npm install`）。
 - 已登入 Cloudflare 帳號的 Wrangler CLI（`npx wrangler login`）。
-- 一支支援可程式化動作按鈕的 iPhone（iPhone 15 Pro 以上）並安裝捷徑 App。
+- 一支安裝捷徑 App 的 iPhone。不需要動作按鈕——那只是其中一種觸發方式（見步驟 5）。
 
 ## 1. 註冊 Spotify 應用程式
 
@@ -131,30 +131,64 @@ KV 命名空間，不需要真實的 Cloudflare KV 命名空間 id。
 
 ## 5. 設定捷徑（Shortcut）
 
-在 iOS 捷徑 App 中建立一個新捷徑，包含兩個動作：
+在 iOS 捷徑 App 中建立一個新捷徑，依序加入**三個**動作：
 
 1. **取得 URL 內容（Get Contents of URL）**
    - URL：`https://<worker-name>.<subdomain>.workers.dev/like`
-   - 方法：`POST`
-   - 標頭（Headers）：新增一個標頭 — `Authorization` = `Bearer <SHORTCUT_SECRET>`（與步驟 4 設定的值相同）
-   - 請求主體：無
-2. **顯示通知（Show Notification）**
-   - 內容：點選欄位 → **選取變數** → **取得字典值** → 鍵值 `message`，來源為上一個動作的結果（Worker 回傳的 JSON）。
+   - 方式：`POST`
+   - 標頭（Headers）：新增一個 — 鍵值 `Authorization`，值 `Bearer <SHORTCUT_SECRET>`
+     （`Bearer` 後面有一個半形空格；值與步驟 4 設定的相同）
+   - 要求內文：**無**（不要留在預設的 JSON）
+2. **取得字典值（Get Dictionary Value）**
+   - 取得：`值`
+   - 鍵值：`message`
+   - 來源會自動接上前一個動作的結果
+3. **顯示通知（Show Notification）**
+   - 內容：選用上一步的**字典值**變數（不是整包「URL 內容」，否則通知會顯示原始 JSON）
+   - 標題：留空
+   - 附件：**清空**（若自動填入了「URL 內容」要移除，否則會多夾一份 JSON 附件）
 
-### 綁定到動作按鈕
+少了第 2 個動作，通知會直接顯示整串
+`{"message":"...","ok":true,"outcome":"added",...}`，而不是那句中文訊息。
 
-**設定 → 動作按鈕 → 捷徑**，選擇這個捷徑。
+### 觸發方式（任選，不必用動作按鈕）
+
+重點是「能快速執行這個捷徑」，用哪個入口都行。動作按鈕只是最順手的一種：
+
+| 觸發方式 | 設定位置 | 備註 |
+|---|---|---|
+| **iPhone 動作按鈕** | 設定 → 動作按鈕 → 捷徑 | 需 iPhone 15 Pro 以上 |
+| **Apple Watch Ultra 動作按鈕** | 錶上「設定 → 動作按鈕 → 捷徑」，或 iPhone 的 Watch App → 動作按鈕 | Ultra / Ultra 2。聽歌時手腕一按最直覺 |
+| **控制中心** | 控制中心編輯 → 加入「捷徑」控制項 | iOS 18 以上 |
+| **鎖定畫面 / 主畫面** | 捷徑 App 長按該捷徑 → 加到主畫面；或鎖定畫面加捷徑小工具 | 全機型可用 |
+| **背面輕點** | 設定 → 輔助使用 → 觸控 → 背面輕點 → 輕點兩下/三下 | 全機型可用，不占按鈕 |
+| **Siri** | 直接喊捷徑名稱（例如「Spotify-like」） | 也可在 Apple Watch / AirPods 上喊 |
+| **Apple Watch 捷徑 App** | 錶上開啟捷徑 App 直接點；或做成錶面複雜功能 | 不限 Ultra |
+
+Apple Watch 上執行沒問題——這個捷徑只用到「取得 URL 內容」，watchOS 支援，
+錶有 LTE 或 Wi-Fi 時可獨立執行，否則會透過配對的 iPhone 連線。
+
+（專案名稱裡的 "action-button" 只是最初的使用情境，不是限制條件。）
 
 ## 6. 驗證
 
-播放中按下動作按鈕，預期會看到：
+播放中觸發這個捷徑（用上面任一種方式），預期會看到：
 
 ```
 已加入喜愛：<歌名> - <歌手>
 ```
 
-也可以在停止播放時試試（預期看到 `目前沒有播放中的歌曲`），以及播放 podcast 時試試（預期看到
-`目前播放的內容無法加入喜愛`），確認三種常見結果都能正確顯示。
+也可以換幾種播放狀態試試，確認四種結果都正確：
+
+| 播放中的內容 | 預期通知 |
+|---|---|
+| 一般歌曲 | `已加入喜愛：<歌名> - <歌手>` |
+| Podcast 單集 | `已加入喜愛：<節目名稱> - <單集標題>` |
+| 完全沒播放 | `目前沒有播放中的歌曲` |
+| 本機檔案（local file） | `目前播放的內容無法加入喜愛` |
+
+Podcast 偶爾也會落到「無法加入喜愛」——當 Spotify 沒有回傳該單集的完整資料
+（`item: null`）時就沒有 id 可以收藏，這是 Spotify API 端的狀況，重試通常就會正常。
 
 **如果 iOS 顯示的是一般性的「執行失敗」/「無法執行捷徑」對話框，而不是中文通知**，代表
 `Authorization` 標頭設錯了 — 檢查捷徑標頭中的 `SHORTCUT_SECRET` 是否與
