@@ -29,7 +29,8 @@ const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 const SHORTCUT_SECRET = "test-shortcut-secret";
 const TOKEN_KV_KEY = "refresh_token";
-// Hardcoded to match src/messages.ts's (unexported) ROTATION_FAILED_SUFFIX.
+// Hardcoded to match src/messages.ts's (unexported) ROTATION_FAILED_SUFFIX.zh_TW;
+// the env below pins MESSAGE_LANGUAGE to zh_TW to match.
 const ROTATION_FAILED_SUFFIX = "（但 token 更新失敗，請留意）";
 
 /**
@@ -59,6 +60,9 @@ function baseEnv(tokenKv: KVNamespace): Env {
     SPOTIFY_REFRESH_TOKEN: "bootstrap-refresh-token",
     SHORTCUT_SECRET,
     TOKEN_KV: tokenKv,
+    // Pinned so this test's expected strings do not depend on the default
+    // language, which is unrelated to what it is asserting.
+    MESSAGE_LANGUAGE: "zh_TW",
   };
 }
 

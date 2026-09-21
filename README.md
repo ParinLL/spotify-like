@@ -119,6 +119,23 @@ npx wrangler secret put SPOTIFY_REFRESH_TOKEN
 npx wrangler secret put SHORTCUT_SECRET      # e.g. value from: openssl rand -base64 32
 ```
 
+### Notification language
+
+Notifications are in **English by default**. To get Traditional Chinese, set
+`MESSAGE_LANGUAGE` in `wrangler.toml`:
+
+```toml
+[vars]
+MESSAGE_LANGUAGE = "zh_TW"   # "en" (default) or "zh_TW"
+```
+
+This is a plain var, not a secret, so it belongs in `wrangler.toml` rather
+than `wrangler secret put`. Only `en` and `zh_TW` are accepted, exactly as
+spelled — `zh-TW`, `zh_tw` and `EN` are all rejected. An unrecognized value
+makes the Worker answer `misconfigured` for every request instead of quietly
+falling back, so a typo is visible rather than silently serving the wrong
+language. Leaving the var out entirely is fine and means English.
+
 Then deploy:
 
 ```bash
@@ -138,6 +155,9 @@ cp .dev.vars.example .dev.vars
 # SPOTIFY_REFRESH_TOKEN, SHORTCUT_SECRET
 npx wrangler dev
 ```
+
+`MESSAGE_LANGUAGE` is read from `wrangler.toml` in local development too, not
+from `.dev.vars` — it is a var, not a secret.
 
 `wrangler dev` reads `.dev.vars` automatically and serves the Worker on
 `http://127.0.0.1:8787`. No additional KV setup is needed for local
@@ -197,15 +217,15 @@ not a requirement.)
 With a track playing, run the shortcut (via any trigger above). Expected banner:
 
 ```
-已加入喜愛：<歌名> - <歌手>
+Liked: <name> - <artist>
 ```
 
 Try a few playback states to confirm all four outcomes render correctly:
 
-| What's playing | Expected notification |
-|---|---|
-| A normal track | `已加入喜愛：<歌名> - <歌手>` |
-| A podcast episode | `已加入喜愛：<節目名稱> - <單集標題>` |
+| What's playing | Expected notification (`en`) | Expected notification (`zh_TW`) |
+|---|---|---|
+| A normal track | `Liked: <name> - <artist>` | `已加入喜愛：<歌名> - <歌手>` |
+| A podcast episode | `Liked: <show> - <title>` | `已加入喜愛：<節目名稱> - <單集標題>` |
 | Nothing | `目前沒有播放中的歌曲` |
 | A local file | `目前播放的內容無法加入喜愛` |
 
@@ -226,13 +246,14 @@ it is the secondary field rather than the thing you are trying to identify.
 
 Columns rather than characters: CJK text is full-width and counts 2 per
 character while Latin counts 1, so 28 columns is ~14 Han characters or ~28 Latin
-characters — the same visual length for both scripts. The banner fits roughly
-38-40 columns per line over two lines, so the `已加入喜愛：` prefix (12), a
+characters — the same visual length for both scripts, and the same budget in
+either notification language. The banner fits roughly 38-40 columns per line
+over two lines, so the prefix (`已加入喜愛：` is 12 columns, `Liked: ` is 7), a
 28-column attribution and the ` - ` separator (3) leave most of the second line
 for the title.
 
 ```
-已加入喜愛：珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft. yoyo
+Liked: 珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft. yoyo
 已加入喜愛：Bohemian Rhapsody - Queen
 ```
 

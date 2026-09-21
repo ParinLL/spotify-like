@@ -27,9 +27,9 @@ const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 const SHORTCUT_SECRET = "test-shortcut-secret";
 const TOKEN_KV_KEY = "refresh_token";
-// Hardcoded to match src/messages.ts's MESSAGES.auth_failed, per the task
-// instructions ("check src/messages.ts to confirm the exact string rather
-// than assuming").
+// Hardcoded to match src/messages.ts's MESSAGES.zh_TW.auth_failed, per the
+// task instructions ("check src/messages.ts to confirm the exact string
+// rather than assuming"). baseEnv pins MESSAGE_LANGUAGE to zh_TW to match.
 const AUTH_FAILED_MESSAGE = "Spotify 授權已失效，請重新取得授權";
 
 /** Any 4xx status, per design.md's "any 4xx status" wording for Property 8. */
@@ -58,6 +58,9 @@ function baseEnv(): Env {
     SPOTIFY_REFRESH_TOKEN: "bootstrap-refresh-token",
     SHORTCUT_SECRET,
     TOKEN_KV: workerEnv.TOKEN_KV,
+    // Pinned so this test's expected strings do not depend on the default
+    // language, which is unrelated to what it is asserting.
+    MESSAGE_LANGUAGE: "zh_TW",
   };
 }
 

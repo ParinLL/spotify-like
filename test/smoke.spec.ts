@@ -11,6 +11,9 @@ const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 const SHORTCUT_SECRET = "test-shortcut-secret";
 
+// MESSAGE_LANGUAGE is deliberately left unset here so the default-language
+// path is what the wiring tests exercise; the zh_TW case below sets it
+// explicitly.
 function testEnv(overrides: Partial<Env> = {}): Env {
   return {
     SPOTIFY_CLIENT_ID: "client-id",
@@ -67,7 +70,7 @@ describe("fetch handler wiring", () => {
 
     expect(response.status).toBe(401);
     const json = await response.json();
-    expect(json).toEqual({ message: "未授權的請求", ok: false, outcome: "unauthorized" });
+    expect(json).toEqual({ message: "Unauthorized request", ok: false, outcome: "unauthorized" });
   });
 
   it("returns 200 with the added message for a successful /like POST", async () => {
@@ -100,7 +103,7 @@ describe("fetch handler wiring", () => {
     expect(json).toEqual({
       // The track name is never truncated and "Queen" is inside the
       // attribution budget, so both reach the message intact.
-      message: "已加入喜愛：Bohemian Rhapsody - Queen",
+      message: "Liked: Bohemian Rhapsody - Queen",
       ok: true,
       outcome: "added",
       track: { name: "Bohemian Rhapsody", artist: "Queen" },
@@ -132,11 +135,88 @@ describe("fetch handler wiring", () => {
     expect(response.status).toBe(200);
     const json = await response.json();
     expect(json).toEqual({
-      message: "已加入喜愛：The Show - Episode Title",
+      message: "Liked: The Show - Episode Title",
       ok: true,
       outcome: "episode_added",
       episode: { name: "Episode Title", show: "The Show" },
     });
     expect(fake.library.has("spotify:episode:ep123")).toBe(true);
+  });
+
+  it("renders the notification in Traditional Chinese when MESSAGE_LANGUAGE is zh_TW", async () => {
+    const fake = createFakeSpotify();
+    vi.stubGlobal("fetch", fake.fetch);
+    fake.scriptCurrentlyPlaying({
+      status: 200,
+      body: {
+        item: { id: "track123", name: "Bohemian Rhapsody", artists: [{ name: "Queen" }] },
+        currently_playing_type: "track",
+        is_playing: true,
+      },
+    });
+
+    const request = new IncomingRequest("http://example.com/like", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SHORTCUT_SECRET}` },
+    });
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(
+      request,
+      testEnv({ MESSAGE_LANGUAGE: "zh_TW" }),
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      message: "已加入喜愛：Bohemian Rhapsody - Queen",
+      ok: true,
+      outcome: "added",
+      track: { name: "Bohemian Rhapsody", artist: "Queen" },
+    });
+  });
+
+  it("reports misconfigured, in the default language, for an unrecognized MESSAGE_LANGUAGE", async () => {
+    const fake = createFakeSpotify();
+    vi.stubGlobal("fetch", fake.fetch);
+
+    const request = new IncomingRequest("http://example.com/like", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SHORTCUT_SECRET}` },
+    });
+    const ctx = createExecutionContext();
+
+    // "zh-TW" is the plausible typo: the BCP 47 spelling rather than the
+    // underscore form this var takes. It must be rejected, not guessed at.
+    const response = await worker.fetch(request, testEnv({ MESSAGE_LANGUAGE: "zh-TW" }), ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      message: "Worker configuration is incomplete, please check the settings",
+      ok: false,
+      outcome: "misconfigured",
+    });
+    // Config validation runs before the orchestration, so a bad language
+    // value costs zero Spotify calls.
+    expect(fake.requestLog).toHaveLength(0);
+  });
+
+  it("falls back to the default language when MESSAGE_LANGUAGE is empty", async () => {
+    const request = new IncomingRequest("http://example.com/like", { method: "POST" });
+    const ctx = createExecutionContext();
+
+    // Empty means "unset", not "invalid" — so this is unauthorized (the gate
+    // rejects it first), rendered in the default language, not misconfigured.
+    const response = await worker.fetch(request, testEnv({ MESSAGE_LANGUAGE: "" }), ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      message: "Unauthorized request",
+      ok: false,
+      outcome: "unauthorized",
+    });
   });
 });

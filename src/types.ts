@@ -3,12 +3,28 @@
 // exchange, orchestration) returns a Result instead of throwing, so failures
 // are values that flow through classify() into an Outcome.
 
+/**
+ * The language of the user-facing notification text, selected by the
+ * MESSAGE_LANGUAGE var. `zh_TW` uses an underscore rather than the BCP 47
+ * `zh-TW` because it is an environment-variable value, not a content
+ * negotiation header, and underscores avoid quoting surprises in shell and
+ * TOML contexts.
+ */
+export type Language = "en" | "zh_TW";
+
 export interface Env {
   SPOTIFY_CLIENT_ID: string; // wrangler secret
   SPOTIFY_CLIENT_SECRET: string; // wrangler secret
   SPOTIFY_REFRESH_TOKEN: string; // wrangler secret — bootstrap value, never overwritten
   SHORTCUT_SECRET: string; // wrangler secret — authenticates the caller
   TOKEN_KV: KVNamespace; // Token_Store binding — persists a rotated refresh token
+  /**
+   * Plain var (not a secret), optional: "en" (the default) or "zh_TW".
+   * Absent or empty means English. A present-but-unrecognized value is a
+   * typo rather than an intention, so it is reported as a configuration
+   * error instead of silently falling back — see config.ts.
+   */
+  MESSAGE_LANGUAGE?: string;
 }
 
 export interface TrackInfo {
@@ -44,7 +60,7 @@ export type Failure =
   | { kind: "api"; status: number }
   | { kind: "network"; cause: unknown }
   | { kind: "malformed" }
-  | { kind: "config"; missing: string[] };
+  | { kind: "config"; missing: string[]; invalid?: string[] };
 
 export type Outcome =
   | { kind: "added"; track: TrackInfo; rotationFailed?: boolean }

@@ -104,6 +104,20 @@ npx wrangler secret put SPOTIFY_REFRESH_TOKEN
 npx wrangler secret put SHORTCUT_SECRET      # 例如用: openssl rand -base64 32 產生
 ```
 
+### 通知語言
+
+通知**預設是英文**。要改成繁體中文，在 `wrangler.toml` 設定 `MESSAGE_LANGUAGE`：
+
+```toml
+[vars]
+MESSAGE_LANGUAGE = "zh_TW"   # "en"（預設）或 "zh_TW"
+```
+
+這是一般的 var 而不是 secret，所以放在 `wrangler.toml`，不用 `wrangler secret put`。
+只接受 `en` 和 `zh_TW` 兩個值，而且必須完全一致 — `zh-TW`、`zh_tw`、`EN` 都會被拒絕。
+填了無法識別的值時，Worker 會對所有請求回 `misconfigured`，而不是默默退回預設值，
+這樣打錯字看得出來，不會安靜地用錯語言回你。整個不寫這個 var 也可以，就是英文。
+
 然後部署：
 
 ```bash
@@ -123,6 +137,9 @@ cp .dev.vars.example .dev.vars
 # SPOTIFY_REFRESH_TOKEN、SHORTCUT_SECRET
 npx wrangler dev
 ```
+
+本機開發時 `MESSAGE_LANGUAGE` 同樣是從 `wrangler.toml` 讀，不是從 `.dev.vars` —
+它是 var，不是 secret。
 
 `wrangler dev` 會自動讀取 `.dev.vars`，並在 `http://127.0.0.1:8787`
 提供服務。本機開發也不需要額外設定 KV — `wrangler dev` 會根據
@@ -178,12 +195,14 @@ Apple Watch 上執行沒問題——這個捷徑只用到「取得 URL 內容」
 已加入喜愛：<歌名> - <歌手>
 ```
 
+（`MESSAGE_LANGUAGE = "en"` 時是 `Liked: <name> - <artist>`）
+
 也可以換幾種播放狀態試試，確認四種結果都正確：
 
-| 播放中的內容 | 預期通知 |
-|---|---|
-| 一般歌曲 | `已加入喜愛：<歌名> - <歌手>` |
-| Podcast 單集 | `已加入喜愛：<節目名稱> - <單集標題>` |
+| 播放中的內容 | 預期通知（`zh_TW`） | 預期通知（`en`） |
+|---|---|---|
+| 一般歌曲 | `已加入喜愛：<歌名> - <歌手>` | `Liked: <name> - <artist>` |
+| Podcast 單集 | `已加入喜愛：<節目名稱> - <單集標題>` | `Liked: <show> - <title>` |
 | 完全沒播放 | `目前沒有播放中的歌曲` |
 | 本機檔案（local file） | `目前播放的內容無法加入喜愛` |
 
@@ -199,8 +218,9 @@ Podcast 偶爾也會落到「無法加入喜愛」——當 Spotify 沒有回傳
 改成只截作者，萬一還是被 iOS 切掉，被切掉的也是次要欄位，而不是你真正想辨認的那個名稱。
 
 欄寬而非字數：中日韓是全角字算 2 欄，英數算 1 欄，所以 28 欄約等於 14 個中文字或 28 個英文字元，
-兩種語言的視覺長度一致。通知橫幅一行大約 38-40 欄、共兩行，`已加入喜愛：`（12 欄）＋作者 28 欄
-＋` - `（3 欄）之後，第二行大部分仍留給名稱。
+兩種文字的視覺長度一致 — 兩種通知語言也共用同一個上限。通知橫幅一行大約 38-40 欄、共兩行，
+前綴（`已加入喜愛：` 是 12 欄、`Liked: ` 是 7 欄）＋作者 28 欄＋` - `（3 欄）之後，第二行
+大部分仍留給名稱。
 
 ```
 已加入喜愛：珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft. yoyo

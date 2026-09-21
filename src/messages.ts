@@ -1,14 +1,19 @@
 // Message catalog per the design's "Error Handling and Message Mapping"
-// section. Every non-success Outcome kind maps to exactly one Traditional
-// Chinese string here, and the catalog is exported as an enumerable
-// collection so tests can assert that a given message is a member of it
+// section. Every non-success Outcome kind maps to exactly one string per
+// supported Language, and the catalogs are exported as enumerable
+// collections so tests can assert that a given message is a member of one
 // (Requirement 4.1 / Property 9).
 //
 // The two success cases ("added", "episode_added") have no fixed string —
 // each is a template instantiated with the added item's fields — so they
 // get formatters instead of catalog entries.
+//
+// Language is threaded explicitly through every formatter rather than read
+// from a module-scope global. A Worker isolate is reused across requests,
+// so a module-level "current language" would be shared mutable state on the
+// request path; passing it as an argument keeps the whole catalog pure.
 
-import type { Outcome } from "./types";
+import type { Language, Outcome } from "./types";
 
 /**
  * Outcome kinds that carry a fixed Chinese message. This excludes "added"
@@ -21,25 +26,92 @@ type MessageOutcomeKind = Exclude<
   "added" | "episode_added" | "not_found" | "method_not_allowed"
 >;
 
-export const MESSAGES: Record<MessageOutcomeKind, string> = {
-  nothing_playing: "目前沒有播放中的歌曲",
-  not_addable: "目前播放的內容無法加入喜愛",
-  auth_failed: "Spotify 授權已失效，請重新取得授權",
-  api_failed: "操作未完成，請稍後再試",
-  network_failed: "無法連線到 Spotify，請檢查網路連線",
-  misconfigured: "伺服器設定不完整，請檢查 Worker 設定",
-  unauthorized: "未授權的請求",
+export const MESSAGES: Record<Language, Record<MessageOutcomeKind, string>> = {
+  en: {
+    nothing_playing: "Nothing is playing",
+    not_addable: "This item can't be added to your library",
+    auth_failed: "Spotify authorization expired, please re-authorize",
+    api_failed: "Couldn't complete that, please try again shortly",
+    network_failed: "Can't reach Spotify, please check your connection",
+    misconfigured: "Worker configuration is incomplete, please check the settings",
+    unauthorized: "Unauthorized request",
+  },
+  zh_TW: {
+    nothing_playing: "目前沒有播放中的歌曲",
+    not_addable: "目前播放的內容無法加入喜愛",
+    auth_failed: "Spotify 授權已失效，請重新取得授權",
+    api_failed: "操作未完成，請稍後再試",
+    network_failed: "無法連線到 Spotify，請檢查網路連線",
+    misconfigured: "伺服器設定不完整，請檢查 Worker 設定",
+    unauthorized: "未授權的請求",
+  },
 };
 
-/** The catalog as an enumerable collection, for membership assertions. */
-export const MESSAGE_CATALOG: readonly string[] = Object.values(MESSAGES);
+/** The default language, used when MESSAGE_LANGUAGE is absent or empty. */
+export const DEFAULT_LANGUAGE: Language = "en";
+
+/** Every supported language tag, derived from the catalog so the two cannot drift. */
+export const LANGUAGES = Object.keys(MESSAGES) as readonly Language[];
+
+/**
+ * Narrows a raw MESSAGE_LANGUAGE value to a Language, or null if it names no
+ * catalog we have. Deliberately strict — no case folding, no `zh-TW`/`zh_tw`
+ * aliasing — so a near-miss is reported as the typo it is rather than
+ * guessed at. config.ts turns the null into a `misconfigured` outcome.
+ */
+export function parseLanguage(raw: string): Language | null {
+  // An own-property check, not `raw in MESSAGES`: `in` walks the prototype
+  // chain, so "toString" / "constructor" / "__proto__" would all report as
+  // supported languages and then render a function or an object into the
+  // notification.
+  //
+  // `Object.prototype.hasOwnProperty.call` rather than `Object.hasOwn`,
+  // which needs lib es2022 — the same reason `Intl.Segmenter` above is
+  // typed structurally instead of widening the project's global `lib`.
+  return Object.prototype.hasOwnProperty.call(MESSAGES, raw) ? (raw as Language) : null;
+}
+
+/**
+ * The language to render in: the configured one when recognized, otherwise
+ * the default.
+ *
+ * This never fails, which is the point — it renders the response for every
+ * outcome including the `misconfigured` one that an unrecognized
+ * MESSAGE_LANGUAGE itself produces. Reporting a bad language value is
+ * config.ts's job; this function's job is to always have *some* language to
+ * report it in.
+ */
+export function resolveLanguage(env: { MESSAGE_LANGUAGE?: string }): Language {
+  const raw = env.MESSAGE_LANGUAGE;
+  if (typeof raw !== "string" || raw.length === 0) return DEFAULT_LANGUAGE;
+  return parseLanguage(raw) ?? DEFAULT_LANGUAGE;
+}
+
+/** One language's catalog as an enumerable collection, for membership assertions. */
+export function messageCatalog(language: Language): readonly string[] {
+  return Object.values(MESSAGES[language]);
+}
+
+/** Every fixed message across every language, for language-agnostic membership assertions. */
+export const MESSAGE_CATALOG: readonly string[] = LANGUAGES.flatMap((language) =>
+  Object.values(MESSAGES[language]),
+);
 
 /**
  * Fixed suffix appended to the success message when a Spotify-issued
  * replacement refresh token could not be persisted to Token_Store. See
  * design.md's "src/messages.ts — addition" section (Requirement 3.3).
  */
-const ROTATION_FAILED_SUFFIX = "（但 token 更新失敗，請留意）";
+const ROTATION_FAILED_SUFFIX: Record<Language, string> = {
+  en: " (but the token refresh failed, please check)",
+  zh_TW: "（但 token 更新失敗，請留意）",
+};
+
+/** The `已加入喜愛：` / `Liked: ` lead-in for a success message. */
+const ADDED_PREFIX: Record<Language, string> = {
+  en: "Liked: ",
+  zh_TW: "已加入喜愛：",
+};
 
 /**
  * Display budget for the *attribution* field of the success message, in
@@ -58,9 +130,11 @@ const ROTATION_FAILED_SUFFIX = "（但 token 更新失敗，請留意）";
  * leave Latin text with half the useful information.
  *
  * 28 is sized against the notification banner, which fits roughly 38-40
- * columns per line over two lines: the `已加入喜愛：` prefix (12 columns), a
- * 28-column attribution and the ` - ` separator (3) leave most of the
- * second line for the title.
+ * columns per line over two lines: the prefix (`已加入喜愛：` is 12 columns,
+ * `Liked: ` is 7), a 28-column attribution and the ` - ` separator (3)
+ * leave most of the second line for the title. The budget is shared across
+ * languages — that is the whole reason it is measured in display columns
+ * rather than characters.
  *
  * Only the human-facing `message` is truncated; the structured `track` /
  * `episode` fields in the response body keep their full values.
@@ -159,28 +233,29 @@ export function truncateToColumns(text: string, maxColumns = MAX_ATTRIBUTION_COL
 }
 
 /**
- * Formats the success message for an added track:
- * `已加入喜愛：<歌名> - <歌手>`
+ * Formats the success message for an added track, in `language`:
+ * `已加入喜愛：<歌名> - <歌手>` / `Liked: <name> - <artist>`
  *
  * The track name is rendered in full; only the artist is capped at
  * MAX_ATTRIBUTION_COLUMNS display columns.
  *
  * When `options.rotationFailed` is true, appends a fixed warning suffix so
  * the caller knows the like succeeded but the refresh-token rotation did
- * not persist. The existing single-argument call shape is unaffected.
+ * not persist.
  */
 export function formatAddedMessage(
   track: { name: string; artist: string },
+  language: Language,
   options?: { rotationFailed?: boolean },
 ): string {
   const artist = truncateToColumns(track.artist);
-  const base = `已加入喜愛：${track.name} - ${artist}`;
-  return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX}` : base;
+  const base = `${ADDED_PREFIX[language]}${track.name} - ${artist}`;
+  return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX[language]}` : base;
 }
 
 /**
- * Formats the success message for an added podcast episode:
- * `已加入喜愛：<節目名稱> - <單集標題>`
+ * Formats the success message for an added podcast episode, in `language`:
+ * `已加入喜愛：<節目名稱> - <單集標題>` / `Liked: <show> - <title>`
  *
  * The episode title is rendered in full; only the show name is capped at
  * MAX_ATTRIBUTION_COLUMNS display columns. Show names in particular run
@@ -195,9 +270,10 @@ export function formatAddedMessage(
  */
 export function formatEpisodeAddedMessage(
   episode: { name: string; show: string },
+  language: Language,
   options?: { rotationFailed?: boolean },
 ): string {
   const show = truncateToColumns(episode.show);
-  const base = `已加入喜愛：${show} - ${episode.name}`;
-  return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX}` : base;
+  const base = `${ADDED_PREFIX[language]}${show} - ${episode.name}`;
+  return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX[language]}` : base;
 }

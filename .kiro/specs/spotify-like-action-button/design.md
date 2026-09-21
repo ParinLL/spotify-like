@@ -72,20 +72,26 @@ scripts/
 
 ### `index.ts` — request handler
 
-Responsibilities, in order: route match, gate, orchestrate, shape response. It contains no Spotify knowledge beyond the call sequence, and it is the only module that constructs a `Response`.
+Responsibilities, in order: resolve the message language, route match, gate, orchestrate, shape response. It contains no Spotify knowledge beyond the call sequence, and it is the only module that constructs a `Response`.
 
 ```ts
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (new URL(request.url).pathname !== "/like") return respond("not_found");
-    if (request.method !== "POST") return respond("method_not_allowed");
-    if (!isAuthorizedCaller(request, env)) return respond("unauthorized");
+    const language = resolveLanguage(env);   // first, and cannot fail
+
+    if (new URL(request.url).pathname !== "/like") return respond("not_found", language);
+    if (request.method !== "POST") return respond("method_not_allowed", language);
+    if (!isAuthorizedCaller(request, env)) return respond("unauthorized", language);
 
     const outcome = await likeCurrentTrack(env);
-    return respond(outcome);
+    return respond(outcome, language);
   },
 } satisfies ExportedHandler<Env>;
 ```
+
+The language is resolved before every other check, including the config check, because `respond` needs a language for *every* response — including the `misconfigured` one that an unrecognized `MESSAGE_LANGUAGE` itself produces. Resolving it later would leave that one response with nothing to render in. `resolveLanguage` cannot fail (it falls back to the default), so putting it first costs nothing; reporting a bad value stays `validateConfig`'s job. `respond` and `messageFor` take the language as a parameter, and it is deliberately not logged — the log line stays `{outcome, status}`.
+
+The two routing messages (`not_found`, `method_not_allowed`) stay English-only and untranslated, and live outside the catalog. They are HTTP protocol reason phrases seen by whatever mis-addressed the Worker, not notification text seen by the user.
 
 ### `likeCurrentTrack` — the orchestration
 
@@ -215,11 +221,14 @@ The 6 second timeout is chosen against the interaction, not the API: three seque
 ## Data Models
 
 ```ts
+type Language = "en" | "zh_TW";   // underscore, not BCP 47 `zh-TW`; see below
+
 interface Env {
   SPOTIFY_CLIENT_ID: string;      // wrangler secret
   SPOTIFY_CLIENT_SECRET: string;  // wrangler secret
   SPOTIFY_REFRESH_TOKEN: string;  // wrangler secret
   SHORTCUT_SECRET: string;        // wrangler secret — authenticates the caller
+  MESSAGE_LANGUAGE?: string;      // plain var, NOT a secret; optional, "en" | "zh_TW"
 }
 
 interface TrackInfo {
@@ -237,7 +246,7 @@ type Failure =
   | { kind: "api"; status: number }
   | { kind: "network"; cause: unknown }
   | { kind: "malformed" }
-  | { kind: "config"; missing: string[] };
+  | { kind: "config"; missing: string[]; invalid?: string[] };
 
 type Outcome =
   | { kind: "added"; track: TrackInfo }
@@ -253,6 +262,10 @@ type Outcome =
 ```
 
 `artist` uses the first artist only. A collaboration rendered as "A, B, C" pushes the track name out of a notification banner, and the first artist is what identifies the song when the user glances at it.
+
+`MESSAGE_LANGUAGE` selects which language the notification text is rendered in. It is a plain var declared under `[vars]` in `wrangler.toml`, not a Worker Secret: it holds a wording choice rather than a credential, and routing it through `wrangler secret put` would hide a value the operator wants to read back. `Language` uses `zh_TW` with an underscore rather than the BCP 47 `zh-TW` because this is an environment-variable value, not a content-negotiation header, and underscores avoid quoting surprises in shell and TOML.
+
+**The value is validated, not coerced.** `validateConfig` — which also checks that every required secret binding is present and non-empty — accepts `"en"` and `"zh_TW"` matched exactly, treats absent or empty as unset (meaning the default, `"en"`), and reports any other non-empty value by returning `err({ kind: "config", missing, invalid: ["MESSAGE_LANGUAGE"] })`, which `classify` maps to the existing `misconfigured` outcome. Matching is deliberately strict: no case folding, no `zh-TW` / `zh_tw` aliasing. The only way to produce an unrecognized value is to have tried to configure the language and misspelled it, so a silent fallback would answer every press in the wrong language with nothing to indicate why — a near miss is worth reporting rather than guessing at. Because config validation already runs before the orchestration, a bad value costs zero Spotify calls. The `invalid` field, like `missing`, records binding *names* only and never values: the `Failure` is constructed from an `Env` that also holds secrets, and keeping values out of it by construction is what stops one reaching a log line later.
 
 ## Endpoint Contract
 
@@ -308,6 +321,10 @@ The trade-off: if the Shortcut's own secret is wrong, the user sees an iOS actio
 
 All user-facing strings live in one catalog module so the set is enumerable and testable.
 
+**The catalog is per language.** `MESSAGES` is keyed first by `Language` and then by outcome kind, so the table's Message column is one string per language rather than one string; the column below shows the `zh_TW` rendering, and `en` carries the same set (`Nothing is playing`, `Spotify authorization expired, please re-authorize`, and so on). Alongside the catalog, `messages.ts` exports `DEFAULT_LANGUAGE` (`"en"`), `LANGUAGES` (derived from the catalog's own keys, so the list and the catalog cannot drift), `parseLanguage(raw)` (strict, returning `null` for anything that is not a catalog key — via an own-property check rather than `in`, so `toString`, `constructor`, and `__proto__` are not mistaken for languages), `resolveLanguage(env)` (never fails: absent, empty, or unrecognized all yield `DEFAULT_LANGUAGE`), and `messageCatalog(language)` for one language's strings. `MESSAGE_CATALOG` remains the flattened union across all languages, for membership assertions that do not care which language rendered. The success lead-in is per language too — `已加入喜愛：` for `zh_TW`, `Liked: ` for `en` — as is the rotation-failure suffix added by the token-rotation feature, and `formatAddedMessage` / `formatEpisodeAddedMessage` take `language` as a required second positional parameter, ahead of their existing optional `options`.
+
+Language is threaded as an argument rather than held in module scope. A Worker isolate is reused across requests, so a module-level "current language" would be shared mutable state on the request path — one request's configuration could render another's message. Passing it keeps the whole catalog pure.
+
 | Condition | Outcome | Message | Requirement |
 |---|---|---|---|
 | Track added (new or already liked) | `added` | `已加入喜愛：<歌名> - <歌手>` (歌手 truncated to 28 display columns; 歌名 in full) | 1.3, 2.2 |
@@ -319,9 +336,10 @@ All user-facing strings live in one catalog module so the set is enumerable and 
 | Response body is not the expected shape | `api_failed` | `操作未完成，請稍後再試` | 4.3 |
 | `fetch` throws: DNS, TLS, reset, timeout/abort | `network_failed` | `無法連線到 Spotify，請檢查網路連線` | 4.4 |
 | A required secret binding is absent or empty | `misconfigured` | `伺服器設定不完整，請檢查 Worker 設定` | derived |
+| `MESSAGE_LANGUAGE` is set to a non-empty value other than `en` or `zh_TW` | `misconfigured` | the same message, rendered in the default language | derived |
 | Bearer secret missing or wrong | `unauthorized` | `未授權的請求` | derived (5.4, 5.5) |
 
-**Derived cases.** Two rows have no acceptance criterion directly behind them. `misconfigured` and `unauthorized` exist because the Worker must answer *something* for requirement 4.1's totality, and silently treating a missing binding as an auth failure would send the operator to re-authorize Spotify when the actual fix is `wrangler secret put`. (`not_addable`, previously in this group, is now directly required by 1.5.)
+**Derived cases.** Three rows, covering two outcomes, have no acceptance criterion directly behind them. `misconfigured` and `unauthorized` exist because the Worker must answer *something* for requirement 4.1's totality, and silently treating a missing binding as an auth failure would send the operator to re-authorize Spotify when the actual fix is `wrangler secret put`. The unrecognized-`MESSAGE_LANGUAGE` row is the same outcome reached from a different cause, and it reports in the default language because that is the only language the Worker can be sure it has. (`not_addable`, previously in this group, is now directly required by 1.5.)
 
 **429 is not retried.** A rate limit from a single-user personal integration means something is wrong (a stuck automation, a repeated press), and sleeping inside the request would push the Shortcut past its timeout. "Try again later" is the honest answer.
 
@@ -387,6 +405,15 @@ wrangler secret put SHORTCUT_SECRET      # openssl rand -base64 32
 
 Then `wrangler deploy` and note the Worker URL. For local runs, put the same four keys in `.dev.vars` (git-ignored) and use `wrangler dev`.
 
+The notification language is optional and is *not* a secret. It goes in `wrangler.toml`:
+
+```toml
+[vars]
+MESSAGE_LANGUAGE = "zh_TW"   # "en" (the default) or "zh_TW"
+```
+
+Omitting the var, or leaving it empty, gives English. Any other non-empty value makes every press answer `伺服器設定不完整，請檢查 Worker 設定` (in English, the default language) until it is corrected, rather than quietly answering in a language nobody asked for.
+
 ### 4. Configure the Shortcut
 
 In the Shortcuts app, create a shortcut with two actions:
@@ -423,7 +450,7 @@ Verify by playing a song and pressing the button. Expected banner: `已加入喜
 
 *For any* track name and artist name, a successful add returns the message `已加入喜愛：<name> - <artist>` where the track name appears verbatim and only the artist is truncated to at most 28 display columns — an ellipsis (`…`) appended only when truncation actually occurred, and an artist that already fits passed through byte-for-byte — unchanged by JSON serialization, for all string content including CJK characters, emoji, surrounding whitespace, and names that themselves contain `" - "`.
 
-**Amended:** this property originally asserted the message was the template instantiated with the raw name and artist. Truncation was added afterwards because iOS truncates a long notification banner *from the tail*. It applies only to the attribution field — the artist for a track, the show name for a podcast episode — and never to the title, so that what is lost to iOS's own truncation is the secondary field rather than the item the reader is trying to identify; an uncapped show name would otherwise consume the banner before the episode title started. The budget is measured in display columns rather than characters because CJK text is full-width: 28 columns is ~14 Han characters or ~28 Latin characters, giving both scripts the same visual length, where a fixed character count would leave Latin text with half the information. The constant is named `MAX_ATTRIBUTION_COLUMNS` to reflect that it governs the attribution field alone. The budget is 28 rather than a smaller number because it is sized against the notification banner, which fits roughly 38-40 columns per line over two lines: the `已加入喜愛：` prefix (12 columns), a 28-column attribution, and the ` - ` separator (3 columns) leave most of the second line for the title. Truncation applies only to the human-facing `message`; the structured `track` / `episode` fields in the response body keep their full untruncated values.
+**Amended:** this property originally asserted the message was the template instantiated with the raw name and artist. Truncation was added afterwards because iOS truncates a long notification banner *from the tail*. It applies only to the attribution field — the artist for a track, the show name for a podcast episode — and never to the title, so that what is lost to iOS's own truncation is the secondary field rather than the item the reader is trying to identify; an uncapped show name would otherwise consume the banner before the episode title started. The budget is measured in display columns rather than characters because CJK text is full-width: 28 columns is ~14 Han characters or ~28 Latin characters, giving both scripts the same visual length, where a fixed character count would leave Latin text with half the information. The constant is named `MAX_ATTRIBUTION_COLUMNS` to reflect that it governs the attribution field alone. The budget is 28 rather than a smaller number because it is sized against the notification banner, which fits roughly 38-40 columns per line over two lines: the lead-in (`已加入喜愛：` is 12 columns, `Liked: ` is 7), a 28-column attribution, and the ` - ` separator (3 columns) leave most of the second line for the title. One budget serves both languages, which is exactly what measuring in display columns buys — a character count would have needed a per-language number. Truncation applies only to the human-facing `message`; the structured `track` / `episode` fields in the response body keep their full untruncated values.
 
 **Validates: Requirements 1.3, 2.2**
 
@@ -474,6 +501,14 @@ Verify by playing a song and pressing the button. Expected banner: `已加入喜
 *For any* outcome, no client id, client secret, refresh token, shared secret, or access token value appears as a substring of the response body, any response header, or any captured log output.
 
 **Validates: Requirements 5.2**
+
+### Property 12: The configured language selects the catalog, and an unrecognized one is reported rather than guessed
+
+*For any* recognized `MESSAGE_LANGUAGE` value crossed with *any* Spotify behavior, every message the Worker returns on `/like` is a member of that language's catalog or that language's success template instantiated, and never a string from another language's catalog; and *for any* non-empty value that is not a recognized language, the Worker returns the `misconfigured` outcome rendered in the default language and issues zero outbound Spotify requests, regardless of how near a miss the value is (differing only in case, or using `zh-TW` rather than `zh_TW`). An absent or empty value behaves as the default language.
+
+The two routing messages are outside the scope of this property: they are untranslated protocol reason phrases and belong to no catalog. The unrecognized-value half is a derived case in the same sense as the `misconfigured` row of the mapping table — no acceptance criterion names `MESSAGE_LANGUAGE` — so what is traced here is requirement 4.1's totality: whatever the configuration, the response still carries a message the Shortcut can display.
+
+**Validates: Requirements 4.1**
 
 ## Testing Strategy
 

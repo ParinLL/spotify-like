@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import {
+  DEFAULT_LANGUAGE,
+  LANGUAGES,
   MAX_ATTRIBUTION_COLUMNS,
+  MESSAGES,
   displayColumns,
   formatAddedMessage,
   formatEpisodeAddedMessage,
+  messageCatalog,
+  parseLanguage,
+  resolveLanguage,
   truncateToColumns,
 } from "../src/messages";
+import type { Language } from "../src/types";
 import { artistNameArb, trackNameArb } from "./helpers/generators";
 
 // Property test for task 2.2, amended when attribution truncation was added.
@@ -31,13 +38,22 @@ const CJK = "一二三四五六七八九十壹貳參肆伍陸柒捌玖拾甲乙�
 /** Full-width graphemes that fit in the budget; an odd budget wastes one column. */
 const FULL_WIDTH_FIT = Math.floor(MAX_ATTRIBUTION_COLUMNS / 2);
 
+// Hardcoded rather than imported from src/messages, which does not export
+// them: an expectation derived from the same constant it is checking would
+// pass no matter what that constant said.
+const PREFIX: Record<Language, string> = {
+  en: "Liked: ",
+  zh_TW: "已加入喜愛：",
+};
+const languageArb = fc.constantFrom(...LANGUAGES);
+
 describe("formatAddedMessage", () => {
   it("Feature: spotify-like-action-button, Property 3: The success message is the template instantiated with the track's full name and the artist truncated to the attribution budget", () => {
     fc.assert(
-      fc.property(trackNameArb, artistNameArb, (name, artist) => {
-        const message = formatAddedMessage({ name, artist });
+      fc.property(trackNameArb, artistNameArb, languageArb, (name, artist, language) => {
+        const message = formatAddedMessage({ name, artist }, language);
 
-        expect(message).toBe(`已加入喜愛：${name} - ${truncateToColumns(artist)}`);
+        expect(message).toBe(`${PREFIX[language]}${name} - ${truncateToColumns(artist)}`);
 
         // The message survives JSON serialization unchanged — it travels to
         // the Shortcut as a JSON string, and CJK/emoji/whitespace must not be
@@ -49,25 +65,50 @@ describe("formatAddedMessage", () => {
   });
 
   it("leaves both fields untouched when the artist fits the budget", () => {
-    const message = formatAddedMessage({ name: "Queen", artist: "Bohemian" });
+    const message = formatAddedMessage({ name: "Queen", artist: "Bohemian" }, "zh_TW");
     expect(message).toBe("已加入喜愛：Queen - Bohemian");
     expect(message).not.toContain(ELLIPSIS);
   });
 
+  it("uses the English lead-in for en and the Chinese one for zh_TW", () => {
+    const track = { name: "Bohemian Rhapsody", artist: "Queen" };
+    expect(formatAddedMessage(track, "en")).toBe("Liked: Bohemian Rhapsody - Queen");
+    expect(formatAddedMessage(track, "zh_TW")).toBe("已加入喜愛：Bohemian Rhapsody - Queen");
+  });
+
   it("never truncates the track name, however far over the budget it runs", () => {
     const name = LATIN.slice(0, MAX_ATTRIBUTION_COLUMNS + 20);
-    const message = formatAddedMessage({ name, artist: "Queen" });
+    const message = formatAddedMessage({ name, artist: "Queen" }, "zh_TW");
     expect(message).toBe(`已加入喜愛：${name} - Queen`);
     expect(message).not.toContain(ELLIPSIS);
   });
 
   it("truncates a long artist while keeping the track name in full", () => {
-    const message = formatAddedMessage({
-      name: "Stairway to Heaven",
-      artist: "Led Zeppelin & The Very Long Orchestra",
-    });
+    const message = formatAddedMessage(
+      { name: "Stairway to Heaven", artist: "Led Zeppelin & The Very Long Orchestra" },
+      "zh_TW",
+    );
     expect(message).toBe("已加入喜愛：Stairway to Heaven - Led Zeppelin & The Very Long…");
     expect(message).toContain("Stairway to Heaven");
+  });
+
+  it("applies the same attribution budget in both languages", () => {
+    // The budget is in display columns, so it is language-independent: the
+    // artist is elided at the same point regardless of the lead-in's width.
+    const track = { name: "Song", artist: "Led Zeppelin & The Very Long Orchestra" };
+    const truncatedArtist = "Led Zeppelin & The Very Long…";
+    expect(formatAddedMessage(track, "en")).toBe(`Liked: Song - ${truncatedArtist}`);
+    expect(formatAddedMessage(track, "zh_TW")).toBe(`已加入喜愛：Song - ${truncatedArtist}`);
+  });
+
+  it("appends a language-appropriate rotation-failed suffix", () => {
+    const track = { name: "Song", artist: "Queen" };
+    expect(formatAddedMessage(track, "en", { rotationFailed: true })).toBe(
+      "Liked: Song - Queen (but the token refresh failed, please check)",
+    );
+    expect(formatAddedMessage(track, "zh_TW", { rotationFailed: true })).toBe(
+      "已加入喜愛：Song - Queen（但 token 更新失敗，請留意）",
+    );
   });
 });
 
@@ -80,10 +121,10 @@ describe("formatAddedMessage", () => {
 describe("formatEpisodeAddedMessage", () => {
   it("formats as 已加入喜愛：<show> - <name> with only the show truncated, surviving a JSON round-trip", () => {
     fc.assert(
-      fc.property(trackNameArb, artistNameArb, (show, name) => {
-        const message = formatEpisodeAddedMessage({ name, show });
+      fc.property(trackNameArb, artistNameArb, languageArb, (show, name, language) => {
+        const message = formatEpisodeAddedMessage({ name, show }, language);
 
-        expect(message).toBe(`已加入喜愛：${truncateToColumns(show)} - ${name}`);
+        expect(message).toBe(`${PREFIX[language]}${truncateToColumns(show)} - ${name}`);
 
         const roundTripped = JSON.parse(JSON.stringify({ message })).message;
         expect(roundTripped).toBe(message);
@@ -95,10 +136,13 @@ describe("formatEpisodeAddedMessage", () => {
     // The real-world case this truncation exists for: a show name long
     // enough that iOS would otherwise cut the episode title off entirely.
     // The show is elided; the title survives intact.
-    const message = formatEpisodeAddedMessage({
-      show: "珞亦不絕 by 法律白話文 Plain Law Media",
-      name: "154｜遲到、擺爛、不夠完美 ft. yoyo",
-    });
+    const message = formatEpisodeAddedMessage(
+      {
+        show: "珞亦不絕 by 法律白話文 Plain Law Media",
+        name: "154｜遲到、擺爛、不夠完美 ft. yoyo",
+      },
+      "zh_TW",
+    );
 
     expect(message).toBe(
       "已加入喜愛：珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft. yoyo",
@@ -111,14 +155,16 @@ describe("formatEpisodeAddedMessage", () => {
   it("appends the rotation-failed warning suffix when requested", () => {
     const message = formatEpisodeAddedMessage(
       { name: "Episode Title", show: "The Show" },
+      "zh_TW",
       { rotationFailed: true },
     );
     expect(message).toBe("已加入喜愛：The Show - Episode Title（但 token 更新失敗，請留意）");
   });
 
-  it("omits the warning suffix by default (single-argument call)", () => {
-    const message = formatEpisodeAddedMessage({ name: "Episode Title", show: "The Show" });
-    expect(message).toBe("已加入喜愛：The Show - Episode Title");
+  it("omits the warning suffix when no options are passed", () => {
+    const episode = { name: "Episode Title", show: "The Show" };
+    expect(formatEpisodeAddedMessage(episode, "zh_TW")).toBe("已加入喜愛：The Show - Episode Title");
+    expect(formatEpisodeAddedMessage(episode, "en")).toBe("Liked: The Show - Episode Title");
   });
 });
 
@@ -198,5 +244,61 @@ describe("truncateToColumns", () => {
         expect(displayColumns(truncated)).toBeLessThanOrEqual(MAX_ATTRIBUTION_COLUMNS + 1);
       }),
     );
+  });
+});
+
+describe("language selection", () => {
+  it("defaults to English", () => {
+    expect(DEFAULT_LANGUAGE).toBe("en");
+  });
+
+  it("accepts exactly the two supported tags", () => {
+    expect([...LANGUAGES].sort()).toEqual(["en", "zh_TW"]);
+    expect(parseLanguage("en")).toBe("en");
+    expect(parseLanguage("zh_TW")).toBe("zh_TW");
+  });
+
+  it("rejects near-miss spellings rather than guessing", () => {
+    // Each of these is a plausible typo. Accepting any of them would make the
+    // accepted set undefined; rejecting them makes a mistake visible.
+    for (const raw of ["zh-TW", "zh_tw", "ZH_TW", "EN", "en-US", "zh", "chinese", " en"]) {
+      expect(parseLanguage(raw)).toBeNull();
+    }
+  });
+
+  it("does not treat inherited Object properties as languages", () => {
+    // `raw in MESSAGES` would otherwise accept "toString", "constructor", ...
+    for (const raw of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+      expect(parseLanguage(raw)).toBeNull();
+    }
+  });
+
+  it("resolves an absent, empty, or unrecognized value to the default", () => {
+    expect(resolveLanguage({})).toBe(DEFAULT_LANGUAGE);
+    expect(resolveLanguage({ MESSAGE_LANGUAGE: "" })).toBe(DEFAULT_LANGUAGE);
+    expect(resolveLanguage({ MESSAGE_LANGUAGE: "zh-TW" })).toBe(DEFAULT_LANGUAGE);
+  });
+
+  it("resolves a recognized value to that language", () => {
+    expect(resolveLanguage({ MESSAGE_LANGUAGE: "zh_TW" })).toBe("zh_TW");
+    expect(resolveLanguage({ MESSAGE_LANGUAGE: "en" })).toBe("en");
+  });
+
+  it("gives every language a non-empty message for every catalogued outcome", () => {
+    const kinds = Object.keys(MESSAGES[DEFAULT_LANGUAGE]);
+    for (const language of LANGUAGES) {
+      // Same key set in every language — a missing translation would
+      // otherwise surface as `undefined` in a notification.
+      expect(Object.keys(MESSAGES[language]).sort()).toEqual([...kinds].sort());
+      for (const message of messageCatalog(language)) {
+        expect(message.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("keeps the two catalogs distinct, so no string is left untranslated", () => {
+    for (const kind of Object.keys(MESSAGES.en) as (keyof typeof MESSAGES.en)[]) {
+      expect(MESSAGES.en[kind]).not.toBe(MESSAGES.zh_TW[kind]);
+    }
   });
 });

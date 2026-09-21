@@ -219,22 +219,34 @@ export async function likeCurrentTrack(env: Env): Promise<Outcome> {
 ### `src/messages.ts` — addition
 
 ```ts
-const ROTATION_FAILED_SUFFIX = "（但 token 更新失敗，請留意）";
+const ROTATION_FAILED_SUFFIX: Record<Language, string> = {
+  en: " (but the token refresh failed, please check)",
+  zh_TW: "（但 token 更新失敗，請留意）",
+};
+
+// The success lead-in is per language for the same reason the suffix is.
+const ADDED_PREFIX: Record<Language, string> = {
+  en: "Liked: ",
+  zh_TW: "已加入喜愛：",
+};
 
 export function formatAddedMessage(
   track: { name: string; artist: string },
+  language: Language,
   options?: { rotationFailed?: boolean },
 ): string {
-  const base = `已加入喜愛：${track.name} - ${track.artist}`;
-  return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX}` : base;
+  const base = `${ADDED_PREFIX[language]}${track.name} - ${track.artist}`;
+  return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX[language]}` : base;
 }
 ```
 
-The existing single-argument call shape (`formatAddedMessage(track)`) keeps working unchanged; `index.ts`'s `respond()` passes the new second argument only when shaping the `added` outcome:
+The formatters take the resolved language as a required second positional parameter, ahead of the optional `options` — `formatAddedMessage(track, language, { rotationFailed })`. Adding that parameter is a deliberate breaking change to the signature, chosen over defaulting the language inside the formatter: a default would let a call site that forgot to thread the language silently render in the wrong one, whereas a required parameter makes every such site a compile error. `index.ts` resolves the language once per request with `resolveLanguage(env)` at the top of `fetch` and threads it through `respond` / `messageFor` for *every* outcome, not just `added`; the rotation-failure flag is still read only on the `added` (and `episode_added`) path:
 
 ```ts
 if (outcome.kind === "added") {
-  body.message = formatAddedMessage(outcome.track, { rotationFailed: outcome.rotationFailed });
+  body.message = formatAddedMessage(outcome.track, language, {
+    rotationFailed: outcome.rotationFailed,
+  });
   // ok stays true, status stays 200 — the outcome kind hasn't changed, only its message
 }
 ```
@@ -287,6 +299,8 @@ Two keys rather than one JSON object because they have different consumers and d
 
 No route, method, header, or request shape changes. The only response-shape change is additive: the `added` outcome's `message` field may carry the warning suffix, per Requirement 3.3. No new top-level JSON field is added to the response body — `rotationFailed` is not exposed to the Shortcut; it is internal state used only to select which message string `respond()` emits. This keeps the wire contract stable for the existing Shortcut configuration (`Get Dictionary Value` on `message`), which is exactly what the base feature's design already relies on for every other outcome variant.
 
+The `message` is rendered in the configured language, so the suffixed success message has one form per language. The `zh_TW` rendering:
+
 ```json
 {
   "message": "已加入喜愛：Bohemian Rhapsody - Queen（但 token 更新失敗，請留意）",
@@ -296,7 +310,20 @@ No route, method, header, or request shape changes. The only response-shape chan
 }
 ```
 
+and the `en` one, identical apart from `message`:
+
+```json
+{
+  "message": "Liked: Bohemian Rhapsody - Queen (but the token refresh failed, please check)",
+  "ok": true,
+  "outcome": "added",
+  "track": { "name": "Bohemian Rhapsody", "artist": "Queen" }
+}
+```
+
 ## Error Handling and Message Mapping — additions
+
+**The catalog is per language**, as is the rotation-failure suffix, so the Message column is one string per language rather than one string; the column below shows the `zh_TW` rendering, and `en` carries the same set (the suffix being ` (but the token refresh failed, please check)` after a `Liked: <name> - <artist>` lead-in). This matches the base feature's mapping table, which states the same convention.
 
 | Condition | Outcome | Message | Requirement |
 |---|---|---|---|
