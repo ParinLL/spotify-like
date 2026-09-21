@@ -98,8 +98,8 @@ describe("fetch handler wiring", () => {
     expect(response.status).toBe(200);
     const json = await response.json();
     expect(json).toEqual({
-      // "Bohemian Rhapsody" is 17 display columns, inside the 28-column
-      // per-field budget, so it reaches the message untruncated.
+      // The track name is never truncated and "Queen" is inside the
+      // attribution budget, so both reach the message intact.
       message: "已加入喜愛：Bohemian Rhapsody - Queen",
       ok: true,
       outcome: "added",

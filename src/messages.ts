@@ -42,26 +42,30 @@ export const MESSAGE_CATALOG: readonly string[] = Object.values(MESSAGES);
 const ROTATION_FAILED_SUFFIX = "（但 token 更新失敗，請留意）";
 
 /**
- * Per-field display budget for the success message, in notification
- * columns. iOS truncates a long banner from the tail, which would drop the
- * second field (the artist, or the episode title) entirely — so each field
- * is capped here instead, keeping both visible.
+ * Display budget for the *attribution* field of the success message, in
+ * notification columns — the artist for a track, the show name for a
+ * podcast episode.
+ *
+ * Only the attribution is capped. The title (track name / episode title) is
+ * always rendered in full: it is the part the reader is identifying, so
+ * losing its tail to iOS's own banner truncation is preferable to eliding
+ * it ourselves. The attribution is secondary, and capping it keeps a long
+ * show name from consuming the banner before the title even starts.
  *
  * The budget is measured in columns rather than characters because CJK text
  * is full-width: 28 columns is ~14 Han characters or ~28 Latin characters,
  * so both scripts get the same visual length. A fixed character count would
  * leave Latin text with half the useful information.
  *
- * 28 is sized against the notification banner itself, which fits roughly
- * 38-40 columns per line over two lines. Two fields at 28 plus the
- * `已加入喜愛：` prefix and the ` - ` separator comes to at most ~73
- * columns, so a fully truncated message still lands inside those two lines
- * while leaving most real track names (`Bohemian Rhapsody` is 17) uncut.
+ * 28 is sized against the notification banner, which fits roughly 38-40
+ * columns per line over two lines: the `已加入喜愛：` prefix (12 columns), a
+ * 28-column attribution and the ` - ` separator (3) leave most of the
+ * second line for the title.
  *
  * Only the human-facing `message` is truncated; the structured `track` /
  * `episode` fields in the response body keep their full values.
  */
-export const MAX_FIELD_COLUMNS = 28;
+export const MAX_ATTRIBUTION_COLUMNS = 28;
 
 /** U+2026, one column, rather than three separate periods. */
 const ELLIPSIS = "…";
@@ -138,7 +142,7 @@ export function displayColumns(text: string): number {
  * The ellipsis is not counted against `maxColumns`, so a truncated field
  * occupies at most `maxColumns + 1` columns.
  */
-export function truncateToColumns(text: string, maxColumns = MAX_FIELD_COLUMNS): string {
+export function truncateToColumns(text: string, maxColumns = MAX_ATTRIBUTION_COLUMNS): string {
   if (displayColumns(text) <= maxColumns) return text;
 
   const kept: string[] = [];
@@ -158,8 +162,8 @@ export function truncateToColumns(text: string, maxColumns = MAX_FIELD_COLUMNS):
  * Formats the success message for an added track:
  * `已加入喜愛：<歌名> - <歌手>`
  *
- * Both fields are truncated to MAX_FIELD_COLUMNS display columns so a long
- * name cannot push the artist out of the notification banner.
+ * The track name is rendered in full; only the artist is capped at
+ * MAX_ATTRIBUTION_COLUMNS display columns.
  *
  * When `options.rotationFailed` is true, appends a fixed warning suffix so
  * the caller knows the like succeeded but the refresh-token rotation did
@@ -169,9 +173,8 @@ export function formatAddedMessage(
   track: { name: string; artist: string },
   options?: { rotationFailed?: boolean },
 ): string {
-  const name = truncateToColumns(track.name);
   const artist = truncateToColumns(track.artist);
-  const base = `已加入喜愛：${name} - ${artist}`;
+  const base = `已加入喜愛：${track.name} - ${artist}`;
   return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX}` : base;
 }
 
@@ -179,9 +182,10 @@ export function formatAddedMessage(
  * Formats the success message for an added podcast episode:
  * `已加入喜愛：<節目名稱> - <單集標題>`
  *
- * Both fields are truncated to MAX_FIELD_COLUMNS display columns, as for a
- * track — podcast show names in particular run long enough that iOS would
- * otherwise drop the episode title entirely.
+ * The episode title is rendered in full; only the show name is capped at
+ * MAX_ATTRIBUTION_COLUMNS display columns. Show names in particular run
+ * long enough that an uncapped one would push the episode title out of the
+ * banner before it started.
  *
  * Same "<A> - <B>" template as formatAddedMessage, but A/B are the show
  * name and the episode title rather than a track's name and artist —
@@ -194,7 +198,6 @@ export function formatEpisodeAddedMessage(
   options?: { rotationFailed?: boolean },
 ): string {
   const show = truncateToColumns(episode.show);
-  const name = truncateToColumns(episode.name);
-  const base = `已加入喜愛：${show} - ${name}`;
+  const base = `已加入喜愛：${show} - ${episode.name}`;
   return options?.rotationFailed ? `${base}${ROTATION_FAILED_SUFFIX}` : base;
 }

@@ -215,28 +215,29 @@ is a Spotify-side condition; retrying usually succeeds.
 
 ### Message length
 
-Each field in the notification (track name / artist, show name / episode title)
-is capped at **28 display columns**, with `…` appended when it overflows.
+The **title** (track name, episode title) is always shown in full. Only the
+**attribution** (artist, show name) is capped — at **28 display columns**, with
+`…` appended when it overflows.
+
+The reason is that iOS truncates a notification *from the tail*. Without a cap,
+a long show name eats the banner before the episode title even starts. Capping
+the attribution instead means that if anything is lost to iOS's own truncation,
+it is the secondary field rather than the thing you are trying to identify.
 
 Columns rather than characters: CJK text is full-width and counts 2 per
 character while Latin counts 1, so 28 columns is ~14 Han characters or ~28 Latin
-characters — the same visual length for both scripts.
-
-28 is sized against the banner, which fits roughly 38-40 columns per line over
-two lines. Two fields at 28 plus the `已加入喜愛：` prefix and the ` - `
-separator comes to at most ~73 columns, so even a fully truncated message stays
-inside those two lines while ordinary track names (`Bohemian Rhapsody` is 17)
-are never clipped.
+characters — the same visual length for both scripts. The banner fits roughly
+38-40 columns per line over two lines, so the `已加入喜愛：` prefix (12), a
+28-column attribution and the ` - ` separator (3) leave most of the second line
+for the title.
 
 ```
-已加入喜愛：珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft…
+已加入喜愛：珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft. yoyo
 已加入喜愛：Bohemian Rhapsody - Queen
 ```
 
-The reason is that iOS truncates a notification *from the tail*: without our own
-cap, a long show name pushes the episode title off screen entirely. Truncation
-affects only the `message` field — the `track` / `episode` objects in the
-response JSON keep their full, untruncated values.
+Truncation affects only the `message` field — the `track` / `episode` objects in
+the response JSON keep their full, untruncated values.
 
 **If iOS shows a generic "The action failed" / "Could not run shortcut"
 dialog instead of a Chinese notification**, the `Authorization` header is
