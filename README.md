@@ -216,15 +216,21 @@ is a Spotify-side condition; retrying usually succeeds.
 ### Message length
 
 Each field in the notification (track name / artist, show name / episode title)
-is capped at **16 display columns**, with `…` appended when it overflows.
+is capped at **28 display columns**, with `…` appended when it overflows.
 
 Columns rather than characters: CJK text is full-width and counts 2 per
-character while Latin counts 1, so 16 columns is ~8 Han characters or ~16 Latin
+character while Latin counts 1, so 28 columns is ~14 Han characters or ~28 Latin
 characters — the same visual length for both scripts.
 
+28 is sized against the banner, which fits roughly 38-40 columns per line over
+two lines. Two fields at 28 plus the `已加入喜愛：` prefix and the ` - `
+separator comes to at most ~73 columns, so even a fully truncated message stays
+inside those two lines while ordinary track names (`Bohemian Rhapsody` is 17)
+are never clipped.
+
 ```
-已加入喜愛：珞亦不絕 by 法律… - 154｜遲到、擺爛…
-已加入喜愛：Bohemian Rhapsod… - Queen
+已加入喜愛：珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft…
+已加入喜愛：Bohemian Rhapsody - Queen
 ```
 
 The reason is that iOS truncates a notification *from the tail*: without our own

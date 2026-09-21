@@ -48,14 +48,20 @@ const ROTATION_FAILED_SUFFIX = "（但 token 更新失敗，請留意）";
  * is capped here instead, keeping both visible.
  *
  * The budget is measured in columns rather than characters because CJK text
- * is full-width: 16 columns is ~8 Han characters or ~16 Latin characters,
+ * is full-width: 28 columns is ~14 Han characters or ~28 Latin characters,
  * so both scripts get the same visual length. A fixed character count would
  * leave Latin text with half the useful information.
+ *
+ * 28 is sized against the notification banner itself, which fits roughly
+ * 38-40 columns per line over two lines. Two fields at 28 plus the
+ * `已加入喜愛：` prefix and the ` - ` separator comes to at most ~73
+ * columns, so a fully truncated message still lands inside those two lines
+ * while leaving most real track names (`Bohemian Rhapsody` is 17) uncut.
  *
  * Only the human-facing `message` is truncated; the structured `track` /
  * `episode` fields in the response body keep their full values.
  */
-const MAX_FIELD_COLUMNS = 16;
+export const MAX_FIELD_COLUMNS = 28;
 
 /** U+2026, one column, rather than three separate periods. */
 const ELLIPSIS = "…";

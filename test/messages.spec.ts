@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import {
+  MAX_FIELD_COLUMNS,
   displayColumns,
   formatAddedMessage,
   formatEpisodeAddedMessage,
@@ -20,8 +21,15 @@ import { artistNameArb, trackNameArb } from "./helpers/generators";
 //
 // Requirements: 1.3, 2.2
 
-const MAX_FIELD_COLUMNS = 16;
 const ELLIPSIS = "…";
+
+// Fixtures below are derived from MAX_FIELD_COLUMNS rather than hard-coded,
+// so widening the budget does not silently turn an "exactly at the budget"
+// case into an "under the budget" one.
+const LATIN = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const CJK = "一二三四五六七八九十壹貳參肆伍陸柒捌玖拾甲乙丙丁戊己庚辛壬癸";
+/** Full-width graphemes that fit in the budget; an odd budget wastes one column. */
+const FULL_WIDTH_FIT = Math.floor(MAX_FIELD_COLUMNS / 2);
 
 describe("formatAddedMessage", () => {
   it("Feature: spotify-like-action-button, Property 3: The success message is the template instantiated with the track's name and artist, each truncated to the field budget", () => {
@@ -48,12 +56,22 @@ describe("formatAddedMessage", () => {
     expect(message).not.toContain(ELLIPSIS);
   });
 
+  it("leaves a typical Latin track name uncut at this budget", () => {
+    // "Bohemian Rhapsody" is 17 columns, well inside the 28-column budget —
+    // the budget is deliberately wide enough that ordinary track names are
+    // not clipped.
+    const message = formatAddedMessage({ name: "Bohemian Rhapsody", artist: "Queen" });
+    expect(message).toBe("已加入喜愛：Bohemian Rhapsody - Queen");
+    expect(message).not.toContain(ELLIPSIS);
+  });
+
   it("truncates a long track name without dropping the artist", () => {
     const message = formatAddedMessage({
-      name: "Bohemian Rhapsody",
+      name: "Bohemian Rhapsody (2011 Remaster)",
       artist: "Queen",
     });
-    expect(message).toBe("已加入喜愛：Bohemian Rhapsod… - Queen");
+    expect(message).toBe("已加入喜愛：Bohemian Rhapsody (2011 Rema… - Queen");
+    expect(message).toContain("Queen");
   });
 });
 
@@ -85,7 +103,9 @@ describe("formatEpisodeAddedMessage", () => {
       name: "154｜遲到、擺爛、不夠完美 ft. yoyo",
     });
 
-    expect(message).toBe("已加入喜愛：珞亦不絕 by 法律… - 154｜遲到、擺爛…");
+    expect(message).toBe(
+      "已加入喜愛：珞亦不絕 by 法律白話文 Plain… - 154｜遲到、擺爛、不夠完美 ft…",
+    );
     // Both fields present, neither swallowed by the other.
     expect(message).toContain("珞亦不絕");
     expect(message).toContain("154");
@@ -130,27 +150,30 @@ describe("truncateToColumns", () => {
   });
 
   it("returns text exactly at the budget unchanged", () => {
-    const exact = "0123456789abcdef"; // 16 columns
+    const exact = LATIN.slice(0, MAX_FIELD_COLUMNS);
     expect(displayColumns(exact)).toBe(MAX_FIELD_COLUMNS);
     expect(truncateToColumns(exact)).toBe(exact);
   });
 
   it("truncates one column over the budget", () => {
-    const over = "0123456789abcdefg"; // 17 columns
-    expect(truncateToColumns(over)).toBe(`0123456789abcdef${ELLIPSIS}`);
+    const kept = LATIN.slice(0, MAX_FIELD_COLUMNS);
+    const over = LATIN.slice(0, MAX_FIELD_COLUMNS + 1);
+    expect(displayColumns(over)).toBe(MAX_FIELD_COLUMNS + 1);
+    expect(truncateToColumns(over)).toBe(`${kept}${ELLIPSIS}`);
   });
 
   it("gives CJK text roughly half the character count of Latin, for equal visual width", () => {
-    const cjk = truncateToColumns("一二三四五六七八九十");
-    // 16 columns / 2 per character = 8 characters kept.
-    expect(cjk).toBe(`一二三四五六七八${ELLIPSIS}`);
+    const source = CJK.slice(0, FULL_WIDTH_FIT + 2); // 4 columns over budget
+    const cjk = truncateToColumns(source);
+    expect(cjk).toBe(`${CJK.slice(0, FULL_WIDTH_FIT)}${ELLIPSIS}`);
     expect(displayColumns(cjk)).toBeLessThanOrEqual(MAX_FIELD_COLUMNS + 1);
   });
 
   it("never splits an emoji into broken halves", () => {
-    // 10 emoji = 20 columns; the budget allows 8 of them (16 columns).
-    const truncated = truncateToColumns("🎵🎵🎵🎵🎵🎵🎵🎵🎵🎵");
-    expect(truncated).toBe(`🎵🎵🎵🎵🎵🎵🎵🎵${ELLIPSIS}`);
+    // Emoji are full-width, so the budget allows FULL_WIDTH_FIT of them;
+    // feed it two more than that.
+    const truncated = truncateToColumns("🎵".repeat(FULL_WIDTH_FIT + 2));
+    expect(truncated).toBe(`${"🎵".repeat(FULL_WIDTH_FIT)}${ELLIPSIS}`);
     // A naive UTF-16 slice would leave a lone surrogate (U+FFFD when
     // rendered); every code point here must still be the full emoji.
     expect(truncated).not.toContain("\uFFFD");
@@ -160,8 +183,11 @@ describe("truncateToColumns", () => {
   });
 
   it("trims trailing whitespace before the ellipsis", () => {
-    const truncated = truncateToColumns("0123456789abcde fghij");
-    expect(truncated).toBe(`0123456789abcde${ELLIPSIS}`);
+    // Put a space in the final column the budget allows, so the kept slice
+    // ends on whitespace.
+    const head = LATIN.slice(0, MAX_FIELD_COLUMNS - 1);
+    const truncated = truncateToColumns(`${head} tail`);
+    expect(truncated).toBe(`${head}${ELLIPSIS}`);
   });
 
   it("respects an explicit column budget", () => {
