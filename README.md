@@ -213,6 +213,25 @@ A podcast can also land on "not addable" — when Spotify returns the episode
 without a full item object (`item: null`) there is no episode id to save. That
 is a Spotify-side condition; retrying usually succeeds.
 
+### Message length
+
+Each field in the notification (track name / artist, show name / episode title)
+is capped at **16 display columns**, with `…` appended when it overflows.
+
+Columns rather than characters: CJK text is full-width and counts 2 per
+character while Latin counts 1, so 16 columns is ~8 Han characters or ~16 Latin
+characters — the same visual length for both scripts.
+
+```
+已加入喜愛：珞亦不絕 by 法律… - 154｜遲到、擺爛…
+已加入喜愛：Bohemian Rhapsod… - Queen
+```
+
+The reason is that iOS truncates a notification *from the tail*: without our own
+cap, a long show name pushes the episode title off screen entirely. Truncation
+affects only the `message` field — the `track` / `episode` objects in the
+response JSON keep their full, untruncated values.
+
 **If iOS shows a generic "The action failed" / "Could not run shortcut"
 dialog instead of a Chinese notification**, the `Authorization` header is
 wrong — check that the `SHORTCUT_SECRET` in the Shortcut's header exactly

@@ -20,6 +20,12 @@
 // Owned exclusively by this file: does not touch any other
 // test/spotify/token*.spec.ts file, to avoid colliding with parallel tasks
 // writing tests against the same module.
+//
+// Timing note: this is the heaviest property in the suite — up to 5 real
+// token-exchange + KV round trips per fast-check run across the 100-run
+// floor (measured at 57s on a slow self-hosted runner). It relies on the
+// global `testTimeout` in vitest.config.ts; deliberately no per-test
+// timeout here, since a local value would cap below that global floor.
 
 import { env as workerEnv } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -102,12 +108,5 @@ describe("bootstrap secret immutability", () => {
         ),
       );
     },
-    // This property makes up to 5 real token-exchange + KV round trips per
-    // fast-check run, across the global 100-run floor — comfortably under
-    // 5s locally, but CI's shared runners can be slower and blew past
-    // vitest's default 5000ms per-test timeout (observed in GitHub Actions
-    // run 35590524511). Raised generously rather than trimmed, since the
-    // test logic itself is correct and cheap to over-provision for.
-    20_000,
   );
 });

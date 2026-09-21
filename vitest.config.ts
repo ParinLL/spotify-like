@@ -24,5 +24,16 @@ export default defineConfig({
     // filesystem in ways the Workers runtime doesn't support, so it is
     // excluded from the Workers-pool test run here.
     exclude: [...configDefaults.exclude, "scripts/__tests__/**"],
+    // Every property test drives real workerd + real (local-simulation) KV
+    // for a 100-run fast-check floor, so per-test wall time is dominated by
+    // the host's speed rather than by the assertions. GitHub's hosted
+    // runners finish the whole suite in ~40s; a self-hosted Gitea act_runner
+    // measured 6x slower on identical code (256s of test time), with the
+    // heaviest property taking 57s on its own — well past vitest's 5s
+    // default. Raised globally rather than per test: the slowness is
+    // environmental, not specific to any one property, and per-test
+    // overrides would silently cap below this floor.
+    testTimeout: 120_000,
+    hookTimeout: 60_000,
   },
 });

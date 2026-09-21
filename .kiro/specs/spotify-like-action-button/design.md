@@ -273,7 +273,7 @@ Always `application/json`, with `message` as the field the Shortcut reads:
 
 ```json
 {
-  "message": "已加入喜愛：Bohemian Rhapsody - Queen",
+  "message": "已加入喜愛：Bohemian Rhapsod… - Queen",
   "ok": true,
   "outcome": "added",
   "track": { "name": "Bohemian Rhapsody", "artist": "Queen" }
@@ -310,7 +310,7 @@ All user-facing strings live in one catalog module so the set is enumerable and 
 
 | Condition | Outcome | Message | Requirement |
 |---|---|---|---|
-| Track added (new or already liked) | `added` | `已加入喜愛：<歌名> - <歌手>` | 1.3, 2.2 |
+| Track added (new or already liked) | `added` | `已加入喜愛：<歌名> - <歌手>` (each field truncated to 16 display columns) | 1.3, 2.2 |
 | 204 / `item: null` / ad / unknown type | `nothing_playing` | `目前沒有播放中的歌曲` | 1.4 |
 | Playing item has no track id (local file, podcast episode) | `not_addable` | `目前播放的內容無法加入喜愛` | 1.5 |
 | Token exchange returns any 4xx (incl. `400 invalid_grant`) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
@@ -419,9 +419,11 @@ Verify by playing a song and pressing the button. Expected banner: `已加入喜
 
 **Validates: Requirements 1.1, 1.2, 3.4**
 
-### Property 3: The success message is the template instantiated with the track's name and artist
+### Property 3: The success message is the template instantiated with the track's name and artist, each truncated to the field budget
 
-*For any* track name and artist name, a successful add returns the message `已加入喜愛：<name> - <artist>`, unchanged by JSON serialization, for all string content including CJK characters, emoji, surrounding whitespace, and names that themselves contain `" - "`.
+*For any* track name and artist name, a successful add returns the message `已加入喜愛：<name> - <artist>` where each field is truncated to at most 16 display columns — an ellipsis (`…`) appended only when truncation actually occurred, and a field that already fits passed through byte-for-byte — unchanged by JSON serialization, for all string content including CJK characters, emoji, surrounding whitespace, and names that themselves contain `" - "`.
+
+**Amended:** this property originally asserted the message was the template instantiated with the raw name and artist. Per-field truncation was added afterwards because iOS truncates a long notification banner *from the tail*, which silently dropped the second field (the artist, or a podcast episode's title) entirely. Capping each field instead keeps both visible. The budget is measured in display columns rather than characters because CJK text is full-width: 16 columns is ~8 Han characters or ~16 Latin characters, giving both scripts the same visual length, where a fixed character count would leave Latin text with half the information. Truncation applies only to the human-facing `message`; the structured `track` / `episode` fields in the response body keep their full untruncated values.
 
 **Validates: Requirements 1.3, 2.2**
 

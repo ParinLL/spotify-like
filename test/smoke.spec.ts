@@ -98,7 +98,10 @@ describe("fetch handler wiring", () => {
     expect(response.status).toBe(200);
     const json = await response.json();
     expect(json).toEqual({
-      message: "已加入喜愛：Bohemian Rhapsody - Queen",
+      // "Bohemian Rhapsody" is 17 display columns, one over the per-field
+      // budget, so the message carries the truncated form — while the
+      // structured `track` field keeps the full untruncated value.
+      message: "已加入喜愛：Bohemian Rhapsod… - Queen",
       ok: true,
       outcome: "added",
       track: { name: "Bohemian Rhapsody", artist: "Queen" },
