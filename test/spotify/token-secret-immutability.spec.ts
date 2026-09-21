@@ -102,5 +102,12 @@ describe("bootstrap secret immutability", () => {
         ),
       );
     },
+    // This property makes up to 5 real token-exchange + KV round trips per
+    // fast-check run, across the global 100-run floor — comfortably under
+    // 5s locally, but CI's shared runners can be slower and blew past
+    // vitest's default 5000ms per-test timeout (observed in GitHub Actions
+    // run 35590524511). Raised generously rather than trimmed, since the
+    // test logic itself is correct and cheap to over-provision for.
+    20_000,
   );
 });
