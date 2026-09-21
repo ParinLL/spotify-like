@@ -9,7 +9,9 @@
     "test": "vitest run",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "scan-secrets": "bash scripts/scan-secrets.sh"
+    "scan-secrets": "bash scripts/scan-secrets.sh",
+    "test:scan-secrets": "node --test scripts/__tests__/scan-secrets.test.mjs",
+    "test:all": "npm run test && npm run test:scan-secrets"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

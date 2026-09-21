@@ -26,23 +26,36 @@ export async function getCurrentlyPlaying(token: string): Promise<Result<Playbac
   }
 
   const payload = body as Record<string, unknown>;
+  const type = payload.currently_playing_type;
+
+  // An episode is never addable regardless of whether `item` is present.
+  // In practice Spotify sometimes reports a playing episode with
+  // `item: null` (no full item object), so this check MUST run before the
+  // `item === null` early-return below — checking `item` first would
+  // misclassify a playing episode as "nothing playing" instead of
+  // "not addable".
+  if (typeof type === "string" && type === "episode") {
+    return ok({ track: normalizeTrack(payload.item, type) });
+  }
+
   const item = payload.item;
   if (item === null || typeof item !== "object") return ok({ track: null });
 
-  const type = payload.currently_playing_type;
   if (typeof type === "string" && NO_TRACK_TYPES.has(type)) return ok({ track: null });
 
-  const track = normalizeTrack(item as Record<string, unknown>, type);
+  const track = normalizeTrack(item, type);
   return ok({ track });
 }
 
-function normalizeTrack(item: Record<string, unknown>, type: unknown): TrackInfo {
+function normalizeTrack(item: unknown, type: unknown): TrackInfo {
+  const itemObj = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
+
   // Episodes never carry an addable track id, regardless of what `id` holds.
-  const rawId = type === "episode" ? null : item.id;
+  const rawId = type === "episode" ? null : itemObj.id;
   const id = typeof rawId === "string" ? rawId : null;
 
-  const name = typeof item.name === "string" ? item.name : "";
-  const artist = extractFirstArtist(item.artists);
+  const name = typeof itemObj.name === "string" ? itemObj.name : "";
+  const artist = extractFirstArtist(itemObj.artists);
 
   return { id, name, artist };
 }

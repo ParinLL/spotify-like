@@ -132,6 +132,41 @@ describe("getCurrentlyPlaying — normalization table", () => {
       value: { track: { id: "track1", name: "Song", artist: "Artist" } },
     });
   });
+
+  // Regression test: Spotify sometimes reports a playing podcast episode
+  // with `item: null` (no full item object at all), not just `item: {...}`
+  // with `currently_playing_type: "episode"`. This combination was
+  // observed against the real Spotify API in production and was
+  // misclassified as `{track: null}` ("nothing playing") instead of
+  // `not_addable`, because the `item === null` early-return in
+  // getCurrentlyPlaying ran before the `currently_playing_type === "episode"`
+  // check. The fix moves the episode check first, so this must return a
+  // track object (not null), even though `item` itself is null and the
+  // resulting name/artist fall back to empty strings.
+  it("200 with item: null AND currently_playing_type: 'episode' still yields a not-addable track, not { track: null }", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          is_playing: true,
+          timestamp: 1789983711448,
+          context: null,
+          progress_ms: 3855220,
+          item: null,
+          currently_playing_type: "episode",
+          actions: { disallows: { resuming: true } },
+        }),
+      ),
+    );
+
+    const result = await getCurrentlyPlaying("token");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.track).not.toBeNull();
+    expect(result.value.track?.id).toBeNull();
+    expect(result.value).toEqual({ track: { id: null, name: "", artist: "" } });
+  });
 });
 
 describe("getCurrentlyPlaying — artist extraction edge cases", () => {

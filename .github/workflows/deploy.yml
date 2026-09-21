@@ -35,6 +35,9 @@ jobs:
       - name: Scan for committed secrets
         run: npm run scan-secrets
 
+      - name: Test the credential scanner itself
+        run: npm run test:scan-secrets
+
       # 僅在推送到 main 時部署。
       # pull_request 事件只跑上面的測試——否則任何 PR 都會把該分支的程式碼
       # 部署到正式 Worker。
