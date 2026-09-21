@@ -2,6 +2,23 @@
 // Refresh_Token for a fresh Access_Token, caching it in module scope until it
 // is within EXPIRY_MARGIN_MS of expiry. See design.md, "spotify/token.ts —
 // token exchange".
+//
+// Test-environment note: @cloudflare/vitest-pool-workers documents that it
+// "reuses Workers and their module caches between test runs where
+// possible" — storage isolation is per test file, but a module-scope `let`
+// like `cached` below is NOT guaranteed to reset between test files sharing
+// a pooled worker. Without a safeguard, one test file's cached token (keyed
+// to its own fake SPOTIFY_REFRESH_TOKEN) could leak into another file's
+// test and short-circuit its exchange, producing a flaky "fetch was never
+// called" failure that only reproduces under certain CI scheduling (seen
+// in production CI, never locally). `cached` therefore also records which
+// SPOTIFY_REFRESH_TOKEN Secret it was populated under, and getAccessToken
+// treats a mismatch as a cache miss. In production this is a no-op check —
+// a single deployment has exactly one SPOTIFY_REFRESH_TOKEN Secret for its
+// whole lifetime (barring an actual rotation, which already forces a fresh
+// exchange for other reasons) — so this costs nothing at runtime and exists
+// purely to make the cache self-validating across whatever module-reuse
+// behavior the test environment does.
 
 import { err, ok, type Env, type Failure, type Result } from "../types";
 import { call, readJson } from "./http";
@@ -15,6 +32,13 @@ const ROTATED_AT_KV_KEY = "rotated_at";
 interface CachedToken {
   token: string;
   expiresAt: number;
+  /**
+   * The env.SPOTIFY_REFRESH_TOKEN Secret value in effect when this token was
+   * cached. Compared on every read so a cache populated under a different
+   * Secret (only possible in a test environment sharing a module instance
+   * across files — see the module doc comment above) is never reused.
+   */
+  secretFingerprint: string;
 }
 
 /**
@@ -44,7 +68,11 @@ export function invalidateAccessToken(): void {
 }
 
 export async function getAccessToken(env: Env): Promise<Result<TokenExchangeResult, Failure>> {
-  if (cached !== null && Date.now() < cached.expiresAt - EXPIRY_MARGIN_MS) {
+  if (
+    cached !== null &&
+    cached.secretFingerprint === env.SPOTIFY_REFRESH_TOKEN &&
+    Date.now() < cached.expiresAt - EXPIRY_MARGIN_MS
+  ) {
     return ok({ token: cached.token, rotationFailed: false });
   }
 
@@ -80,6 +108,7 @@ export async function getAccessToken(env: Env): Promise<Result<TokenExchangeResu
   cached = {
     token: accessToken,
     expiresAt: Date.now() + expiresIn * 1000,
+    secretFingerprint: env.SPOTIFY_REFRESH_TOKEN,
   };
 
   let rotationFailed = false;

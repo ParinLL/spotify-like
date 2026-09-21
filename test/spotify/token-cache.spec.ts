@@ -1,18 +1,24 @@
 // Unit tests for the token cache in src/spotify/token.ts. Covers the
 // warm-cache skip, the 60s expiry margin forcing a fresh exchange, the
-// expires_in default of 3600s, and invalidateAccessToken() forcing a
-// re-exchange. See design.md, "spotify/token.ts — token exchange".
+// expires_in default of 3600s, invalidateAccessToken() forcing a
+// re-exchange, and the cache's secretFingerprint guard against cross-file
+// module reuse. See design.md, "spotify/token.ts — token exchange".
 //
 // Task 5.3. Validates: Requirements 3.1
 //
-// NOTE on isolation: this file, per Cloudflare's vitest-pool-workers docs,
-// runs with per-test-file isolation (a fresh module registry per test
-// file), so the module-scope `cached` variable in src/spotify/token.ts does
-// not leak into test/spotify/token.spec.ts (task 5.2's property test) even
-// without any special handling here. We still restore Date.now() in
-// afterEach and call invalidateAccessToken() defensively at the start of
-// every test body, as a second line of defense in case that isolation
-// assumption ever changes.
+// NOTE on isolation: @cloudflare/vitest-pool-workers documents storage
+// isolation as per test file, but ALSO documents that it "reuses Workers
+// and their module caches between test runs where possible" — the
+// module-scope `cached` variable in src/spotify/token.ts is therefore NOT
+// guaranteed to reset between test files. This was observed causing a real
+// flaky CI failure (a different test file's cached token leaking into
+// test/spotify/token.spec.ts's Property 1 test, GitHub Actions run
+// 35591003436) even though it never reproduced locally. `cached` now
+// records a `secretFingerprint` (the SPOTIFY_REFRESH_TOKEN Secret in effect
+// when it was populated) and getAccessToken treats a mismatch as a cache
+// miss — see the "secretFingerprint guard" describe block below for the
+// direct regression test. We still call invalidateAccessToken() at the
+// start of every test body as a first line of defense.
 //
 // Time is controlled via vi.spyOn(Date, "now") rather than
 // vi.useFakeTimers(), since http.ts applies a real AbortSignal.timeout(6000)
@@ -157,5 +163,51 @@ describe("token cache", () => {
       expect(second.value.token).toBe("token-2");
       expect(second.value.rotationFailed).toBe(false);
     }
+  });
+});
+
+describe("token cache — secretFingerprint guard", () => {
+  it("a cached token from a different SPOTIFY_REFRESH_TOKEN is never reused, even within the expiry margin", async () => {
+    invalidateAccessToken();
+
+    // Simulate one "test file" populating the cache under its own Secret.
+    const envA: Env = { ...env, SPOTIFY_REFRESH_TOKEN: "secret-from-file-a" };
+    const fetchMock = vi.fn().mockResolvedValue(tokenResponse("token-from-a", 3600));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getAccessToken(envA);
+    expect(first.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Simulate a different "test file" reusing the same module instance
+    // (per Cloudflare's documented module-cache reuse) with a DIFFERENT
+    // SPOTIFY_REFRESH_TOKEN, well within the first token's expiry margin.
+    // Without the fingerprint guard, this would incorrectly hit the warm
+    // cache and return token-from-a without ever calling fetch.
+    const envB: Env = { ...env, SPOTIFY_REFRESH_TOKEN: "secret-from-file-b" };
+    fetchMock.mockResolvedValue(tokenResponse("token-from-b", 3600));
+
+    const second = await getAccessToken(envB);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(second.ok).toBe(true);
+    if (second.ok) {
+      expect(second.value.token).toBe("token-from-b");
+    }
+  });
+
+  it("a cached token under the SAME SPOTIFY_REFRESH_TOKEN is still reused normally (no regression to the warm-cache behavior)", async () => {
+    invalidateAccessToken();
+
+    const fetchMock = vi.fn().mockResolvedValue(tokenResponse("token-1", 3600));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getAccessToken(env);
+    const second = await getAccessToken(env);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (second.ok) expect(second.value.token).toBe("token-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
