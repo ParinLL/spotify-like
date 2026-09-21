@@ -12,7 +12,7 @@ compatibility_date = "2024-11-11"
 # that is neither of those two is rejected as a misconfiguration rather than
 # silently falling back, so a typo is visible instead of quietly serving the
 # wrong language.
-MESSAGE_LANGUAGE = "en"
+MESSAGE_LANGUAGE = "zh_TW"
 
 [[kv_namespaces]]
 binding = "TOKEN_KV"
