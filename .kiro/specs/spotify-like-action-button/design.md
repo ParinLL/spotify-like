@@ -2,9 +2,9 @@
 
 ## Overview
 
-A single Cloudflare Worker endpoint turns one Action Button press into one "save currently playing track to Liked Songs" operation on one personal Spotify account, and answers with a Traditional Chinese sentence short enough to read in a notification banner.
+A single Cloudflare Worker endpoint turns one Action Button press into one "save currently playing item to Liked Songs" operation on one personal Spotify account, and answers with a Traditional Chinese sentence short enough to read in a notification banner. The item is a track or a podcast episode; both are saved, with their own message wording.
 
-The Worker is stateless. Every invocation exchanges the stored refresh token for a fresh access token, reads the currently playing item, and issues an add-only `PUT` against the library using Spotify's current (non-deprecated) `/me/library` endpoint. There is no database, no session, no per-user record, and no queue. The only persisted state is three values in Cloudflare Worker Secrets plus one shared secret used to authenticate the Shortcut itself.
+The Worker is stateless. Every invocation exchanges the stored refresh token for a fresh access token, reads the currently playing item, and issues an add-only `PUT` against the library using Spotify's current `/me/library` endpoint, which replaced the now-removed `/me/tracks`. There is no database, no session, no per-user record, and no queue. The only persisted state is three values in Cloudflare Worker Secrets plus one shared secret used to authenticate the Shortcut itself.
 
 Two design constraints shape everything below:
 
@@ -28,12 +28,16 @@ sequenceDiagram
     W->>W: verify shared secret (constant-time)
     W->>SA: POST /api/token<br/>grant_type=refresh_token (Basic id:secret)
     SA-->>W: access_token, expires_in
-    W->>SP: GET /v1/me/player/currently-playing
+    W->>SP: GET /v1/me/player/currently-playing<br/>?additional_types=track,episode
     SP-->>W: 200 {item} | 204 no content
     alt a track is playing
         W->>SP: PUT /v1/me/library?uris=spotify:track:<trackId>
         SP-->>W: 200
         W-->>SC: 200 {"message": "已加入喜愛：<歌名> - <歌手>"}
+    else a podcast episode is playing
+        W->>SP: PUT /v1/me/library?uris=spotify:episode:<episodeId>
+        SP-->>W: 200
+        W-->>SC: 200 {"message": "已加入喜愛：<節目名稱> - <單集標題>"}
     else nothing playing
         W-->>SC: 200 {"message": "目前沒有播放中的歌曲"}
     end
@@ -61,11 +65,11 @@ src/
   spotify/
     token.ts      # refresh-token grant + in-isolate access token cache
     player.ts     # GET /v1/me/player/currently-playing → PlaybackState
-    library.ts    # PUT /v1/me/library (add-only), GET /v1/me/library/contains
+    library.ts    # PUT /v1/me/library (add-only, track or episode URI)
     http.ts       # fetch wrapper: timeout, status classification, no-throw result
   outcome.ts      # Outcome union + classification of failures into outcomes
   messages.ts     # the message catalog and the success formatter
-  types.ts        # Env, PlaybackState, TrackInfo
+  types.ts        # Env, PlaybackState, TrackInfo, EpisodeInfo
 scripts/
   get-refresh-token.ts  # one-time authorization-code helper (not deployed)
 ```
@@ -103,18 +107,31 @@ async function likeCurrentTrack(env: Env): Promise<Outcome> {
   const playback = await getCurrentlyPlaying(token.value);
   if (!playback.ok) return classify(playback.error);
 
-  const track = playback.value.track;               // TrackInfo | null
-  if (track === null) return { kind: "nothing_playing" };
-  if (track.id === null) return { kind: "not_addable" };  // local file / episode
+  const { track, episode } = playback.value;        // at most one is non-null
 
-  const saved = await saveTrack(token.value, trackUriFromId(track.id));
-  if (!saved.ok) return classify(saved.error);
+  if (track !== null) {
+    if (track.id === null) return { kind: "not_addable" };   // local file
+    const saved = await saveTrack(token.value, trackUriFromId(track.id));
+    if (!saved.ok) return classify(saved.error);
+    return { kind: "added", track };
+  }
 
-  return { kind: "added", track };
+  if (episode !== null) {
+    if (episode.id === null) return { kind: "not_addable" }; // defensive only
+    const saved = await saveTrack(token.value, episodeUriFromId(episode.id));
+    if (!saved.ok) return classify(saved.error);
+    return { kind: "episode_added", episode };
+  }
+
+  return { kind: "nothing_playing" };
 }
 ```
 
 Every step returns a `Result` rather than throwing, so the orchestration has one exit shape and the classifier is the single place where a failure becomes a user-visible message. No step can fall through without producing an `Outcome`.
+
+The snippet is illustrative — the shipped function also threads the stale-token retry and the rotation-failure flag through each call — but the branching is exactly this. A currently-playing item is one of five things: a track, an addable episode, a not-addable episode (no id), a not-addable track (a local file), or nothing.
+
+**A playing podcast episode is added, not rejected.** It takes the same add path as a track, differing only in the URI built for it (`episodeUriFromId` rather than `trackUriFromId`) and in the outcome returned: `episode_added`, with its own message template, rather than `added`. The two are deliberately separate outcomes because the fields differ — a track is identified by name and artist, an episode by show name and episode title (`item.name` vs `item.show.name` on the Spotify side), and the notification is worth wording per case rather than forcing an episode through a track-shaped template. Local files remain `not_addable` unconditionally; that was a scope decision, not an oversight, and is not extended here.
 
 ### `spotify/token.ts` — token exchange
 
@@ -160,23 +177,34 @@ Refresh-token *expiry* (the 6-month lifetime described in the setup procedure) r
 
 ### `spotify/player.ts` — reading playback
 
-The currently-playing endpoint has more shapes than its happy path suggests, and conflating them is the most likely source of a wrong notification. `getCurrentlyPlaying` normalizes all of them into `PlaybackState`:
+The currently-playing endpoint has more shapes than its happy path suggests, and conflating them is the most likely source of a wrong notification. `getCurrentlyPlaying` normalizes all of them into `PlaybackState`, whose two fields are mutually exclusive — at most one of `track` / `episode` is non-null:
 
 | Spotify response | Normalized to |
 |---|---|
-| `204 No Content` (nothing active) | `{ track: null }` |
-| `200` with empty body | `{ track: null }` |
-| `200` with `item: null` | `{ track: null }` |
-| `200`, `currently_playing_type` of `ad` / `unknown` | `{ track: null }` |
-| `200`, `currently_playing_type: "episode"` | `{ track: { id: null, ... } }` |
-| `200` track with `id: null` (local file) | `{ track: { id: null, ... } }` |
-| `200` track with an id, `is_playing: false` (paused) | `{ track: {...} }` — paused still counts |
+| `204 No Content` (nothing active) | `{ track: null, episode: null }` |
+| `200` with empty body | `{ track: null, episode: null }` |
+| `200` with `item: null` and a type other than `episode` | `{ track: null, episode: null }` |
+| `200`, `currently_playing_type` of `ad` / `unknown` | `{ track: null, episode: null }` |
+| `200`, `currently_playing_type: "episode"` with an item | `{ track: null, episode: { id, name, show } }` |
+| `200`, `currently_playing_type: "episode"` with `item: null` | `{ track: null, episode: { id: null, ... } }` |
+| `200` track with `id: null` (local file) | `{ track: { id: null, ... }, episode: null }` |
+| `200` track with an id, `is_playing: false` (paused) | `{ track: {...}, episode: null }` — paused still counts |
+
+**The request must send `additional_types=track,episode`.** Spotify's currently-playing endpoint defaults to track-only responses: without that parameter, a playing episode is reported with `item: null` regardless of what is actually playing — a long-standing, documented API behavior ([spotify/web-api#1496](https://github.com/spotify/web-api/issues/1496)). The parameter is therefore load-bearing rather than an optimization. It is what makes the episode row above reachable at all; omitting it collapses every playing episode into the `item: null` row and makes the episode path dead code. It lives on the `CURRENTLY_PLAYING_URL` constant so there is no call site that can forget it. Its absence was the real root cause of episodes always appearing not-addable in production: the endpoint was never asked for episode data in the first place.
+
+**The episode check must precede the `item === null` early return.** `currently_playing_type === "episode"` is tested first, before the guard that maps a null or non-object `item` to "nothing playing"; checking `item` first would misclassify a playing episode as nothing playing rather than surfacing it as an episode. That ordering was originally written for the `item: null` episode responses seen in production, which turned out to be caused by the missing `additional_types` parameter rather than by the endpoint. It is kept as defence, not for that case: it costs nothing, and episode normalization already tolerates a null item by yielding `id: null`, so an unforeseen empty item degrades to `not_addable` instead of the wrong "nothing playing".
 
 Paused counts as "currently playing" deliberately: the user's mental model is "the song on screen", and requiring `is_playing: true` would make the button fail exactly when someone pauses to reach for their phone.
 
+**None of the fields read here were removed in February 2026** — verified, and recorded so the next reader does not have to re-derive it. This module reads `currently_playing_type`, `item.id`, `item.name`, `item.artists[0].name`, and `item.show.name`. The February 2026 removals that touched these two content types were, for tracks, `available_markets`, `external_ids`, `linked_from`, and `popularity`, and for shows, `available_markets` and `publisher`. The design reads none of them. Paraphrased from the [February 2026 changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026); content was rephrased for compliance with licensing restrictions.
+
 ### `spotify/library.ts` — add-only writes
 
-`PUT /v1/me/tracks` and `GET /v1/me/tracks/contains` are deprecated. The module uses the current equivalents, `PUT /v1/me/library` and `GET /v1/me/library/contains`, both of which take a `uris` query parameter of comma-separated Spotify URIs (`spotify:track:<id>`, up to 40 per request) rather than bare ids.
+`PUT /v1/me/tracks` is not deprecated — it is **removed**. Spotify's February 2026 API changes deleted the entity-specific save endpoints (`/me/tracks`, `/me/episodes`, `/me/shows`, `/me/albums`, `/me/audiobooks`, `/me/following`) together with their `DELETE` variants, and replaced all of them with `PUT /me/library`; the entity-specific `contains` endpoints were likewise replaced by a single `GET /me/library/contains`. So the module's endpoint choice is not a preference between two working options — `/me/library` is the only save path that exists, and there is nothing to fall back to.
+
+`PUT /me/library` takes `uris`: a required, comma-separated list of Spotify URIs (`spotify:track:<id>`, `spotify:episode:<id>`), at most 40 per request, rather than bare ids. It is a **query parameter, not a JSON body** — the Save Items to Library reference's own example is a URL-encoded query string, which is what the module builds. Worth stating explicitly, because the migration guide's JavaScript sample shows a client-library call taking an object argument and can be misread as requiring a JSON body.
+
+Both paragraphs draw on the [February 2026 changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026), the [February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide), and the [Save Items to Library reference](https://developer.spotify.com/documentation/web-api/reference/save-library-items). Content was rephrased for compliance with licensing restrictions.
 
 ```ts
 export function saveTrack(token: string, trackUri: string) {
@@ -189,15 +217,23 @@ export function saveTrack(token: string, trackUri: string) {
 export function trackUriFromId(trackId: string): string {
   return `spotify:track:${trackId}`;
 }
+
+export function episodeUriFromId(episodeId: string): string {
+  return `spotify:episode:${episodeId}`;
+}
 ```
 
-The orchestrator builds the URI from the track id (`trackUriFromId`) and passes it to `saveTrack`, so the id-to-URI mapping lives in one place and every call site works in URIs rather than bare ids.
+The orchestrator builds the URI from the item's id and passes it to `saveTrack`, so the id-to-URI mapping lives in one place and every call site works in URIs rather than bare ids.
 
-`PUT /v1/me/library` is already idempotent: adding a track that is present is a no-op returning `200`. This is what makes requirement 2 free rather than something needing a read-then-write. The module exports no `DELETE` path at all — the absence of a remove function is the enforcement mechanism for "add-only", checked by a test that scans the recorded request log.
+`/me/library` accepts URIs for several item types, not only tracks, so one add path serves both cases: `saveTrack` is generic over the URI it is handed, and `episodeUriFromId` sits alongside `trackUriFromId` as the only difference between saving a track and saving a podcast episode. The name `saveTrack` is historical — it saves whatever the URI names. There is no episode-specific endpoint and no second write path to keep in step.
 
-The `user-library-read` scope backs an optional `isTrackSaved` probe (`GET /v1/me/library/contains?uris=<uri>`). It is not on the critical path: its result cannot change whether the add is issued, and a probe failure is swallowed. It exists so a future revision can distinguish "newly added" from "already liked" wording without a re-authorization, since scopes cannot be widened without redoing the authorization-code flow.
+`PUT /v1/me/library` is already idempotent: adding an item that is present is a no-op returning `200`. This is what makes requirement 2 free rather than something needing a read-then-write. The module exports no `DELETE` path at all — the absence of a remove function is the enforcement mechanism for "add-only", checked by a test that scans the recorded request log.
 
-Using the current `/me/library` endpoints (rather than the deprecated `/me/tracks` endpoints) for both the save and the optional check satisfies requirements 3.4 and 3.5 directly — there is no fallback to the deprecated endpoints anywhere in the module.
+**The saved-status probe was removed, and its scope with it.** An `isTrackSaved` helper existed against `GET /v1/me/library/contains?uris=<uri>`, backed by the `user-library-read` scope, so a future revision could distinguish "newly added" from "already liked" wording. It was never called on the request path: `PUT /me/library` is idempotent, so the answer could not change whether the add is issued. Keeping it without its scope would have been worse than not having it — it swallowed every failure into `false`, so a `403` from the missing scope would have been indistinguishable from a genuine "not saved", and a future caller would have read the wrong answer with nothing to indicate why. It was dead code justifying a live permission, so both went. `LIBRARY_CONTAINS_URL` went with them; `library.ts` now exports exactly `trackUriFromId`, `episodeUriFromId`, and `saveTrack`. The module carries a comment recording the same reasoning and the consequence: re-adding the probe means re-adding the scope, which means re-authorizing.
+
+The standing argument for keeping it — that scopes cannot be widened without redoing the authorization-code flow, so ask for everything up front — is void, and its reversal is why the narrowing became worth doing. Widening still requires repeating that flow; what changed is that the flow is already repeated at least twice a year because the refresh token expires after 6 months (see the setup procedure). Deferring a scope until something actually needs it therefore costs approximately nothing.
+
+Using `/me/library` for the save satisfies requirement 3.4 directly, and there is no fallback to a removed endpoint anywhere in the module. Requirement 3.5 is a different matter: it specifies the saved-status check and names the `user-library-read` scope it needs, and neither is implemented any more. The shipped scope request is narrower than requirement 3.3's four-scope list too. As with requirement 1.5 and podcast episodes, the code is what runs; reconciling 3.3 and 3.5 with the shipped scopes is a requirements change that has not been made.
 
 ### `spotify/http.ts` — the call wrapper
 
@@ -234,13 +270,22 @@ interface Env {
 }
 
 interface TrackInfo {
-  id: string | null;   // null for local files and episodes: not addable
+  id: string | null;   // null for local files: not addable
   name: string;
   artist: string;      // artists[0].name; see note below
 }
 
+interface EpisodeInfo {
+  id: string | null;   // null only if a playing episode arrives without an item
+  name: string;        // the episode's own title
+  show: string;        // item.show.name — the podcast name
+}
+
 interface PlaybackState {
+  // Mutually exclusive: at most one of the two is non-null, per what the
+  // currently-playing endpoint can report.
   track: TrackInfo | null;
+  episode: EpisodeInfo | null;
 }
 
 type Failure =
@@ -252,6 +297,7 @@ type Failure =
 
 type Outcome =
   | { kind: "added"; track: TrackInfo }
+  | { kind: "episode_added"; episode: EpisodeInfo }
   | { kind: "nothing_playing" }
   | { kind: "not_addable" }
   | { kind: "auth_failed" }
@@ -295,6 +341,19 @@ Always `application/json`, with `message` as the field the Shortcut reads:
 }
 ```
 
+A saved podcast episode answers in the same shape, but with an `episode` object in place of `track` — `name` is the episode title and `show` is the podcast name, matching the different template:
+
+```json
+{
+  "message": "已加入喜愛：科技島讀 - 第 42 集：晶圓代工",
+  "ok": true,
+  "outcome": "episode_added",
+  "episode": { "name": "第 42 集：晶圓代工", "show": "科技島讀" }
+}
+```
+
+Neither object carries the internal `id`: `respond` copies `name`/`artist` for a track and `name`/`show` for an episode and nothing else, so the Spotify id never reaches the caller.
+
 ```json
 { "message": "目前沒有播放中的歌曲", "ok": true, "outcome": "nothing_playing" }
 ```
@@ -311,7 +370,7 @@ Business outcomes return `200` even when they represent a Spotify failure. The S
 
 | Outcome | HTTP | Rationale |
 |---|---|---|
-| `added`, `nothing_playing`, `not_addable` | 200 | Normal outcomes |
+| `added`, `episode_added`, `nothing_playing`, `not_addable` | 200 | Normal outcomes |
 | `auth_failed`, `api_failed`, `network_failed`, `misconfigured` | 200 | Must reach the notification; failure is carried in `ok`/`outcome` |
 | `unauthorized` | 401 | Not the Shortcut; an unauthenticated prober should see a rejection, not a 200 |
 | `not_found` | 404 | Wrong path |
@@ -330,8 +389,9 @@ Language is threaded as an argument rather than held in module scope. A Worker i
 | Condition | Outcome | Message | Requirement |
 |---|---|---|---|
 | Track added (new or already liked) | `added` | `已加入喜愛：<歌名> - <歌手>` (歌手 truncated to 28 display columns; 歌名 in full) | 1.3, 2.2 |
-| 204 / `item: null` / ad / unknown type | `nothing_playing` | `目前沒有播放中的歌曲` | 1.4 |
-| Playing item has no track id (local file, podcast episode) | `not_addable` | `目前播放的內容無法加入喜愛` | 1.5 |
+| Podcast episode added (new or already liked) | `episode_added` | `已加入喜愛：<節目名稱> - <單集標題>` (節目名稱 truncated to 28 display columns; 單集標題 in full) | derived — see below |
+| 204 / `item: null` under a non-`episode` type / ad / unknown type | `nothing_playing` | `目前沒有播放中的歌曲` | 1.4 |
+| Playing item has no addable id: a local file, or (defensively) a track or episode arriving with a null id | `not_addable` | `目前播放的內容無法加入喜愛` | 1.5, local-file half only |
 | Token exchange returns any 4xx (incl. `400 invalid_grant` from a revoked *or expired* refresh token) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
 | Data call returns 401 or 403 (after one retry) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
 | Any other Spotify status ≥ 400, including 429 and 5xx | `api_failed` | `操作未完成，請稍後再試` | 4.3 |
@@ -341,7 +401,9 @@ Language is threaded as an argument rather than held in module scope. A Worker i
 | `MESSAGE_LANGUAGE` is set to a non-empty value other than `en` or `zh_TW` | `misconfigured` | the same message, rendered in the default language | derived |
 | Bearer secret missing or wrong | `unauthorized` | `未授權的請求` | derived (5.4, 5.5) |
 
-**Derived cases.** Three rows, covering two outcomes, have no acceptance criterion directly behind them. `misconfigured` and `unauthorized` exist because the Worker must answer *something* for requirement 4.1's totality, and silently treating a missing binding as an auth failure would send the operator to re-authorize Spotify when the actual fix is `wrangler secret put`. The unrecognized-`MESSAGE_LANGUAGE` row is the same outcome reached from a different cause, and it reports in the default language because that is the only language the Worker can be sure it has. (`not_addable`, previously in this group, is now directly required by 1.5.)
+**Derived cases.** Four rows, covering three outcomes, have no acceptance criterion directly behind them. `misconfigured` and `unauthorized` exist because the Worker must answer *something* for requirement 4.1's totality, and silently treating a missing binding as an auth failure would send the operator to re-authorize Spotify when the actual fix is `wrangler secret put`. The unrecognized-`MESSAGE_LANGUAGE` row is the same outcome reached from a different cause, and it reports in the default language because that is the only language the Worker can be sure it has.
+
+`episode_added` is the fourth, and it is derived in a stronger sense: requirement 1.5 does not merely omit it, it says the opposite — a podcast episode is named there, alongside a local file, as content the Worker should report as not addable. Episode support shipped without a requirements change, so the code and 1.5 now disagree on podcasts, and the code is what runs. What the row is traced to is requirement 4.1's totality: a playing episode is an outcome the Worker must answer with some displayable message, and `episode_added` with the show/title template is the answer it gives. Requirement 1.5 still governs its other half, the local file, which is why the `not_addable` row cites it for that half alone. Reconciling 1.5 with the shipped behavior is a requirements change that has not been made.
 
 **429 is not retried.** A rate limit from a single-user personal integration means something is wrong (a stuck automation, a repeated press), and sleeping inside the request would push the Shortcut past its timeout. "Try again later" is the honest answer.
 
@@ -357,11 +419,13 @@ Language is threaded as an argument rather than held in module scope. A Worker i
 6. **Secrets live only in Worker Secrets.** Set via `wrangler secret put`; never in `wrangler.toml`, source, or the repo. `.dev.vars` is used for local development and is git-ignored. CI greps the tree for credential-shaped literals.
 7. **Rotation is a one-command operation.** `wrangler secret put` re-deploys the binding, so a suspected leak is remediated by rotating the shared secret (and updating the Shortcut) or by revoking the Spotify app's authorization and redoing the one-time flow.
 8. **Minimal surface.** One path, one method, no CORS headers (the caller is not a browser, and omitting them stops browser-based cross-origin use), no request body parsing, and therefore no parser to attack.
-9. **Scopes are minimal.** Exactly the four scopes the flow needs. Notably absent is any playback-control scope, so a compromised token cannot start, stop, or redirect playback.
+9. **Scopes are minimal — two of them.** The flow requests exactly `user-read-currently-playing` (for `GET /me/player/currently-playing`) and `user-library-modify` (for `PUT /me/library`, which covers both tracks and episodes). It previously requested four, which this point described as minimal and which was not accurate even then. What dropping the other two bought: no playback-control scope, so a compromised token cannot start, stop, or redirect playback; no read access to the library, so a compromised token cannot enumerate what the account has saved; and no Spotify Connect device visibility, since `user-read-playback-state` also covers `GET /me/player/devices` and would have disclosed the account's devices to a token that never needed them. The narrowing and its reasoning are in "spotify/library.ts — add-only writes" and in step 2 of the setup procedure.
 
 ## One-Time Setup Procedure
 
 "One-time" holds for everything here except the authorization in step 2, which expires and has to be redone at least every 6 months (see step 4); registering the app, setting the secrets, and configuring the Shortcut are genuinely done once.
+
+Two conditions are standing prerequisites rather than one-time steps. The account that owns the app must hold an active Spotify **Premium** subscription for as long as the button is expected to work — required, not optional, since Spotify's February 2026 changes. And the app stays in Development Mode, whose limits are described in "Development Mode constraints" at the end of this section.
 
 ### 1. Register the Spotify application
 
@@ -380,7 +444,7 @@ https://accounts.spotify.com/authorize
   ?client_id=<CLIENT_ID>
   &response_type=code
   &redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fcallback
-  &scope=user-read-currently-playing%20user-read-playback-state%20user-library-modify%20user-library-read
+  &scope=user-read-currently-playing%20user-library-modify
 ```
 
 2. Approve access. The browser lands on the redirect URI with `?code=<AUTH_CODE>`.
@@ -396,11 +460,13 @@ curl -X POST https://accounts.spotify.com/api/token \
 
 4. Save the `refresh_token` from the response. The `access_token` in the same response can be discarded — the Worker mints its own.
 
-**The refresh token expires after 6 months.** Spotify announced this on 2026-06-18: refresh tokens issued to apps registered in the Developer Dashboard now have a 6-month lifetime, effective immediately for newly registered apps and from 2026-07-20 for existing ones. The clock starts when the account authorizes the app and is **not** reset or extended by refreshing — the Worker exchanging an access token every hour keeps itself running but does nothing for the underlying grant. Revoking the app's access or changing the account password still invalidates the token earlier than that. Re-authorizing (repeating this step) starts a fresh 6-month window, and previously granted scopes carry over as long as the same four are requested. Refresh tokens carry no issuance timestamp, so anticipating the expiry means recording the authorization date somewhere yourself.
+**The refresh token expires after 6 months.** Spotify announced this on 2026-06-18: refresh tokens issued to apps registered in the Developer Dashboard now have a 6-month lifetime, effective immediately for newly registered apps and from 2026-07-20 for existing ones. The clock starts when the account authorizes the app and is **not** reset or extended by refreshing — the Worker exchanging an access token every hour keeps itself running but does nothing for the underlying grant. Revoking the app's access or changing the account password still invalidates the token earlier than that. Re-authorizing (repeating this step) starts a fresh 6-month window, and previously granted scopes carry over as long as the same two are requested. Refresh tokens carry no issuance timestamp, so anticipating the expiry means recording the authorization date somewhere yourself.
 
 The change applies to the user-authorized flows — Authorization Code, which this design uses, and Authorization Code with PKCE — and not to Client Credentials. Sources: `developer.spotify.com/blog/2026-06-18-refresh-token-expiration` and the *Refreshing tokens* tutorial at `developer.spotify.com/documentation/web-api/tutorials/refreshing-tokens`; both are rephrased rather than quoted here, for licensing compliance.
 
-Scopes cannot be widened later without repeating this flow, which is why all four are requested now even though the library-read scope is only used by the optional probe.
+**Two scopes are requested, narrowed from four — and the reason for asking for four has been reversed.** The authorize URL above requests `user-read-currently-playing`, for `GET /me/player/currently-playing`, and `user-library-modify`, for `PUT /me/library` (which covers episodes as well as tracks). Dropped were `user-read-playback-state`, which no code path ever used — it covers `GET /me/player` and `GET /me/player/devices`, neither of which this Worker calls, and it additionally asks the user for Spotify Connect device access — and `user-library-read`, which backed only the saved-status probe that has since been removed.
+
+The old justification was that scopes cannot be widened without repeating this flow, so it is cheaper to ask for everything up front. Widening does still require repeating the flow. But the 6-month expiry documented just above means the flow is repeated at least twice a year regardless, so deferring a scope until something needs it costs approximately nothing — and the cost of not deferring is a permission granted for years to code that never calls it. That reversal is the reason the narrowing was worth doing. Note that requirement 3.3 still lists four scopes; the shipped request is the narrower one.
 
 ### 3. Set the Worker secrets
 
@@ -447,6 +513,18 @@ Then bind it: **Settings → Action Button → Shortcut**, and select this short
 
 Verify by playing a song and pressing the button. Expected banner: `已加入喜愛：<歌名> - <歌手>`. If iOS shows a generic "the action failed" dialog instead of a Chinese message, the `Authorization` header is wrong — that is the one case where the Worker answers with a non-200 status.
 
+### Development Mode constraints
+
+A personal app stays in Development Mode; Extended Quota Mode is for apps with a user base, which this does not have. Since Spotify's February 2026 changes, that mode carries three constraints.
+
+**The app owner must hold an active Spotify Premium subscription.** If it lapses the app stops working, and it resumes on resubscription. This deserves more operational attention than its simplicity suggests, because it is the one failure cause with no message of its own: it surfaces as `api_failed` (`操作未完成，請稍後再試`, "try again shortly") or as an authorization message, and neither points at billing. So when the button stops working with no code change, check the subscription first — it is the cheapest cause to rule out and the one the notification will never name.
+
+**One Client ID per developer, and five users per app.** Neither binds a single-account personal integration: one app, one user. Apps that already exceeded these limits are grandfathered.
+
+**Development Mode has a lower rate limit than Extended Quota Mode.** Not a practical concern here: one press costs at most three calls — token exchange, currently-playing, library add — against a 30-second rolling window. The 429 handling described above exists for a stuck automation, not for normal use.
+
+Paraphrased from the [February 2026 changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026) and [migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide); content was rephrased for compliance with licensing restrictions.
+
 ## Correctness Properties
 
 *A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
@@ -473,13 +551,15 @@ Verify by playing a song and pressing the button. Expected banner: `已加入喜
 
 ### Property 4: Every "no track" signal maps to the nothing-playing message and writes nothing
 
-*For any* response in the no-track family — HTTP 204, an empty body, `item: null`, or a `currently_playing_type` of `ad` or `unknown` — the Worker returns exactly `目前沒有播放中的歌曲` and issues no request against `/me/library`.
+*For any* response in the no-track family — HTTP 204, an empty body, `item: null` under a `currently_playing_type` other than `episode`, or a `currently_playing_type` of `ad` or `unknown` — the Worker returns exactly `目前沒有播放中的歌曲` and issues no request against `/me/library`.
 
 **Validates: Requirements 1.4**
 
 ### Property 5: A not-addable current track is reported distinctly and writes nothing
 
-*For any* currently-playing payload whose track has a null id (a podcast episode or a local file), the Worker returns exactly `目前播放的內容無法加入喜愛` and issues no request against `/me/library`.
+*For any* currently-playing payload whose item has a null id — a local file, or a track or episode arriving without an addable id — the Worker returns exactly `目前播放的內容無法加入喜愛` and issues no request against `/me/library`.
+
+**Amended:** this property originally read "whose track has a null id (a podcast episode or a local file)", which is no longer true of episodes. Podcast episodes were not-addable by design at the time, matching requirement 1.5, and `PlaybackState` carried a single `track` field that an episode was folded into with a null id. Episode support shipped afterwards: an episode now has its own `EpisodeInfo`, its own `episode_added` outcome, and its own show/title message, so the only remaining unconditional not-addable case is a local file. The null-id episode clause survives only as defence. What made every episode look not-addable in production was not Spotify but this design's own currently-playing request omitting `additional_types=track,episode`, which makes the endpoint report an episode with `item: null`; with the parameter sent, a playing episode arrives with a populated item and an id, and reaches Property 13 instead of this one.
 
 **Validates: Requirements 1.5**
 
@@ -527,9 +607,17 @@ The two routing messages are outside the scope of this property: they are untran
 
 **Validates: Requirements 4.1**
 
+### Property 13: A playing podcast episode is saved as an episode URI and reported with the show/title message
+
+*For any* currently-playing payload whose `currently_playing_type` is `episode` and whose item carries a non-null id, the Worker issues exactly one `PUT` to `/me/library` whose `uris` parameter is that id as a `spotify:episode:<id>` URI — never `spotify:track:<id>` — and returns the outcome `episode_added` with the message `已加入喜愛：<節目名稱> - <單集標題>`, the show name truncated to the attribution budget and the episode title in full, regardless of the payload's other fields.
+
+**Derived, not traced.** No acceptance criterion covers this: episode support shipped without a requirements change, and requirement 1.5 states the contrary — that a podcast episode is content the Worker reports as not addable. This property is labelled derived in the same sense as the `misconfigured` and `unauthorized` rows of the mapping table, and what it traces to is requirement 4.1's totality: a playing episode must produce some displayable message. It is recorded here because it is the behavior that ships and is tested, and because leaving it implicit would let the contradiction with 1.5 go unnoticed a second time.
+
+**Validates: Requirements 4.1**
+
 ## Testing Strategy
 
-**Harness.** Vitest with `@cloudflare/vitest-pool-workers`, so tests exercise the real `fetch` handler in `workerd` rather than a mock of it. Outbound calls go through an injected fetch stub that records every request (method, URL, headers, body) and serves scripted responses — the recorded log is what Properties 2, 4, 5, 7, and 10 assert against.
+**Harness.** Vitest with `@cloudflare/vitest-pool-workers`, so tests exercise the real `fetch` handler in `workerd` rather than a mock of it. Outbound calls go through an injected fetch stub that records every request (method, URL, headers, body) and serves scripted responses — the recorded log is what Properties 2, 4, 5, 7, 10, and 13 assert against.
 
 **Property tests** use `fast-check`, minimum 100 runs each, and are tagged:
 
@@ -537,10 +625,12 @@ The two routing messages are outside the scope of this property: they are untran
 Feature: spotify-like-action-button, Property 6: Liking is idempotent
 ```
 
-Property 6 and Property 7 are model-based: the fake Spotify keeps a `Set<string>` of saved ids (keyed by URI), `PUT /me/library` inserts, and the model asserts membership and monotonicity. Generators must include the edge cases identified during prework — CJK and emoji in names, a `" - "` inside a track name, local files with `id: null`, episodes, multi-artist tracks, and status codes across 400–599 including 429.
+Property 6 and Property 7 are model-based: the fake Spotify keeps a `Set<string>` of saved ids (keyed by URI), `PUT /me/library` inserts, and the model asserts membership and monotonicity. Because the set is keyed by URI rather than by bare id, it holds `spotify:episode:` entries as naturally as `spotify:track:` ones and needs nothing added for the episode path. Generators must include the edge cases identified during prework — CJK and emoji in names, a `" - "` inside a track name or show name, local files with `id: null`, episodes with an id (addable, the Property 13 case) and episodes without one (the residual Property 5 case), multi-artist tracks, and status codes across 400–599 including 429. A generated episode payload must also set `currently_playing_type: "episode"`, since that field and not the item's shape is what selects the episode branch.
 
-**Unit tests** stay few and cover what properties cannot: the four-scope constant in the authorize URL (3.3), that saves and checks both target `/me/library` rather than the deprecated `/me/tracks` endpoints (3.4, 3.5), the `GET /v1/me/library/contains` shape and the fact that a probe failure does not change the outcome (3.5), the stale-token retry issuing exactly one re-exchange and stopping after one retry, and the paused-track decision.
+The fake's modelled endpoints are the three the Worker calls: the token exchange, currently-playing, and the `/me/library` add. Its `GET /me/library/contains` route was removed along with `isTrackSaved`, deliberately rather than as cleanup — a fake answering `200` for an endpoint the Worker is no longer scoped for would let a re-added call pass the whole suite and then `403` in production. An unmodelled endpoint failing loudly in tests is the safer default.
+
+**Unit tests** stay few and cover what properties cannot: the scope constant in the authorize URL, which is now exactly `user-read-currently-playing` and `user-library-modify` — the test asserts the two that ship, not requirement 3.3's four — that the save targets `/me/library` rather than the removed `/me/tracks` (3.4), the stale-token retry issuing exactly one re-exchange and stopping after one retry, and the paused-track decision. The saved-status-probe tests went with `isTrackSaved`.
 
 **Smoke tests** cover configuration, which has no input to vary: one test per missing or empty secret binding asserting the `misconfigured` message with no Spotify call (3.2), and a CI step grepping the tree for hardcoded credential literals and for a committed `.dev.vars` (5.3, and the static half of 5.2).
 
-**Manual verification** closes the loop the harness cannot reach (6.4): after deploy, press the Action Button with a track playing, with playback stopped, and with a podcast playing, and confirm the three expected banners.
+**Manual verification** closes the loop the harness cannot reach (6.4): after deploy, press the Action Button with a track playing, with playback stopped, and with a podcast playing, and confirm the three expected banners — the third being the `已加入喜愛：<節目名稱> - <單集標題>` success message, not the not-addable one. A podcast press answering `目前播放的內容無法加入喜愛` is the specific symptom of the currently-playing request having lost its `additional_types=track,episode` parameter, and this is the only check that catches that regression against the live endpoint.
