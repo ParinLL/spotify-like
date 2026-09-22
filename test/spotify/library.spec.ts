@@ -1,14 +1,13 @@
 // Unit tests for add-only saved-tracks writes (src/spotify/library.ts).
-// Covers the PUT URL/URI-encoding, that a re-add of a present track is
-// treated as a plain success (PUT is idempotent per design.md), the
-// isTrackSaved boolean-array parsing, and that probe failures are swallowed
-// rather than propagated. See design.md "spotify/library.ts — add-only
-// writes".
+// Covers the PUT URL/URI-encoding, that a re-add of a present item is
+// treated as a plain success (PUT is idempotent per design.md), and that the
+// module exposes no removal path. See design.md "spotify/library.ts —
+// add-only writes".
 //
 // Task 7.2. Validates: Requirements 2.1, 2.2, 3.5
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { episodeUriFromId, isTrackSaved, saveTrack, trackUriFromId } from "../../src/spotify/library";
+import { episodeUriFromId, saveTrack, trackUriFromId } from "../../src/spotify/library";
 import * as library from "../../src/spotify/library";
 
 function jsonResponse(status: number, body?: unknown): Response {
@@ -91,62 +90,10 @@ describe("saveTrack", () => {
   });
 });
 
-describe("isTrackSaved", () => {
-  it("resolves true when the probe returns [true]", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [true])));
-
-    await expect(isTrackSaved("token-xyz", trackUriFromId("abc123"))).resolves.toBe(true);
-  });
-
-  it("resolves false when the probe returns [false]", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [false])));
-
-    await expect(isTrackSaved("token-xyz", trackUriFromId("abc123"))).resolves.toBe(false);
-  });
-
-  it("resolves false rather than throwing when fetch rejects with a network error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network error")));
-
-    await expect(isTrackSaved("token-xyz", trackUriFromId("abc123"))).resolves.toBe(false);
-  });
-
-  it("resolves false rather than throwing when the probe returns a non-2xx status", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(500)));
-
-    await expect(isTrackSaved("token-xyz", trackUriFromId("abc123"))).resolves.toBe(false);
-  });
-
-  it("resolves false rather than throwing when the probe body is malformed", async () => {
-    const malformed = new Response("{not valid json", { status: 200 });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(malformed));
-
-    await expect(isTrackSaved("token-xyz", trackUriFromId("abc123"))).resolves.toBe(false);
-  });
-
-  it("a probe failure cannot change the outcome: saveTrack still succeeds independently", async () => {
-    // isTrackSaved is off-critical-path — even when it fails, saveTrack (the
-    // operation that actually determines the outcome) is unaffected because
-    // the two are never coupled at the call site.
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network error")));
-    const probeResult = await isTrackSaved("token-xyz", trackUriFromId("abc123"));
-    expect(probeResult).toBe(false);
-
-    vi.unstubAllGlobals();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200)));
-    const saveResult = await saveTrack("token-xyz", trackUriFromId("abc123"));
-    expect(saveResult.ok).toBe(true);
-  });
-});
-
 describe("module export surface", () => {
   it("exports no DELETE-issuing function (add-only)", () => {
     const exportNames = Object.keys(library);
-    expect(exportNames).toEqual([
-      "trackUriFromId",
-      "episodeUriFromId",
-      "saveTrack",
-      "isTrackSaved",
-    ]);
+    expect(exportNames).toEqual(["trackUriFromId", "episodeUriFromId", "saveTrack"]);
     for (const name of exportNames) {
       expect(name.toLowerCase()).not.toContain("delete");
       expect(name.toLowerCase()).not.toContain("remove");

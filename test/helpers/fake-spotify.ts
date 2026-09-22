@@ -43,7 +43,6 @@ interface Route {
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
 const CURRENTLY_PLAYING_PATH = "/v1/me/player/currently-playing";
 const LIBRARY_PATH = "/v1/me/library";
-const LIBRARY_CONTAINS_PATH = "/v1/me/library/contains";
 
 export interface FakeSpotify {
   /** Drop-in replacement for `fetch`. Install with `vi.stubGlobal("fetch", fake.fetch)` or inject directly. */
@@ -120,14 +119,6 @@ export function createFakeSpotify(): FakeSpotify {
     (url) => {
       for (const uri of urisFromQuery(url)) library.add(uri);
       return { status: 200 };
-    },
-  );
-
-  route(
-    (url, method) => method === "GET" && url.pathname === LIBRARY_CONTAINS_PATH,
-    (url) => {
-      const uris = urisFromQuery(url);
-      return { status: 200, body: uris.map((uri) => library.has(uri)) };
     },
   );
 

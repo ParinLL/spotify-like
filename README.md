@@ -18,7 +18,8 @@ Only the **Web API** (REST endpoints: token exchange, currently-playing, library
 
 ## Prerequisites
 
-- A Spotify account (Free or Premium) whose library the button should modify.
+- A Spotify account whose library the button should modify. **Premium is
+  required** — see [Development Mode requirements](#development-mode-requirements).
 - Node.js and this repo installed (`npm install`).
 - The Wrangler CLI logged in to your Cloudflare account (`npx wrangler login`).
 - An iPhone with the Shortcuts app. An Action Button is not required — it's just one of several triggers (see step 5).
@@ -32,11 +33,25 @@ Only the **Web API** (REST endpoints: token exchange, currently-playing, library
 
 ## 2. Obtain the refresh token
 
-This is a one-time OAuth authorization-code exchange. It requests exactly
-four scopes: `user-read-currently-playing`, `user-read-playback-state`,
-`user-library-modify`, `user-library-read`. **Scopes cannot be widened
-later without repeating this entire flow**, so don't skip any of the four
-even if you think you won't need `user-library-read` yet.
+This is an OAuth authorization-code exchange requesting exactly two scopes,
+which is everything the Worker uses and nothing more:
+
+| Scope | What it is for |
+|---|---|
+| `user-read-currently-playing` | `GET /me/player/currently-playing` |
+| `user-library-modify` | `PUT /me/library` (saves both tracks and episodes) |
+
+Earlier versions requested two more. `user-read-playback-state` was never
+used by any code path — it covers `GET /me/player` and `/me/player/devices`,
+which this Worker does not call, and it additionally asks the user for
+Spotify Connect device access. `user-library-read` backed an
+"is it already saved?" probe that has since been removed, because
+`PUT /me/library` is idempotent and the answer could not change whether the
+add is issued.
+
+Widening scopes later does mean repeating this flow — but you already repeat
+it at least every 6 months for the refresh token anyway, so there is no
+reason to over-request now.
 
 ### Option A: helper script (recommended)
 
@@ -62,7 +77,7 @@ copy it. Nothing is written to disk.
 1. Open this URL in a browser signed in as the target account (fill in `<CLIENT_ID>`):
 
    ```
-   https://accounts.spotify.com/authorize?client_id=<CLIENT_ID>&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fcallback&scope=user-read-currently-playing%20user-read-playback-state%20user-library-modify%20user-library-read
+   https://accounts.spotify.com/authorize?client_id=<CLIENT_ID>&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fcallback&scope=user-read-currently-playing%20user-library-modify
    ```
 
 2. Approve access. The browser redirects to `http://127.0.0.1:8787/callback?code=<AUTH_CODE>` (this will show as unreachable in the browser, since nothing is listening — that's fine, just copy `<AUTH_CODE>` from the address bar).
@@ -297,6 +312,28 @@ matches the secret you set with `wrangler secret put SHORTCUT_SECRET`. This
 is the one outcome the Worker answers with a non-200 status, so every other
 failure (Spotify down, expired Spotify authorization, network issues) still
 reaches `Show Notification` with a readable message.
+
+## Development Mode requirements
+
+A personal app like this one stays in Spotify's **Development Mode** (Extended
+Quota Mode is for apps serving many users). Since Spotify's
+[February 2026 changes](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide),
+that mode carries requirements worth knowing before you debug anything else:
+
+- **The app owner needs an active Spotify Premium subscription.** If it lapses,
+  the app stops working, and it resumes once you resubscribe. This is the one
+  failure cause with no distinctive notification — it surfaces as
+  `Couldn't complete that, please try again shortly` (`api_failed`) or an
+  authorization message, neither of which points at billing. Check your
+  subscription before anything else if the button stops working and nothing
+  changed.
+- **One Client ID per developer**, and **5 users per app**. Fine for personal
+  use. Existing apps that already exceed these are grandfathered.
+- Development Mode has a lower rate limit than Extended Quota Mode. Not a
+  concern here: one press costs at most 3 API calls against a
+  [30-second rolling window](https://developer.spotify.com/documentation/web-api/concepts/rate-limits).
+
+Content was rephrased for compliance with licensing restrictions.
 
 ## Re-authorizing every 6 months
 

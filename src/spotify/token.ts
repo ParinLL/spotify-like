@@ -139,10 +139,14 @@ async function readEffectiveRefreshToken(env: Env): Promise<string> {
 /**
  * Persists a Rotated_Refresh_Token and its Rotation_Timestamp to
  * Token_Store. Best-effort: swallows any failure from either write and
- * reports it via the boolean return rather than throwing, matching
- * `spotify/library.ts`'s `isTrackSaved` pattern for an off-critical-path
- * write whose result cannot change whether the add is issued. See
- * design.md, "spotify/token.ts — changed".
+ * reports it via the boolean return rather than throwing — an
+ * off-critical-path write whose result cannot change whether the add is
+ * issued. See design.md, "spotify/token.ts — changed".
+ *
+ * Unlike the removed library probe, the swallowed failure is not lost: it
+ * is surfaced to the user through the rotation-failure warning suffix.
+ * A boolean that silently absorbs an error is only safe when somebody
+ * reads it.
  */
 async function persistRotatedRefreshToken(env: Env, newRefreshToken: string): Promise<boolean> {
   try {

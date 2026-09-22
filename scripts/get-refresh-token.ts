@@ -24,13 +24,15 @@ const CALLBACK_PORT = 8787;
 const AUTHORIZE_URL = "https://accounts.spotify.com/authorize";
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
 
-// The four scopes required by the Worker (design.md, requirements 3.3).
-const SCOPES = [
-  "user-read-currently-playing",
-  "user-read-playback-state",
-  "user-library-modify",
-  "user-library-read",
-] as const;
+// The two scopes the Worker actually uses (design.md, requirements 3.3):
+//   user-read-currently-playing -> GET /me/player/currently-playing
+//   user-library-modify         -> PUT /me/library
+//
+// Narrowed from four. `user-read-playback-state` was never used — it covers
+// GET /me/player and /me/player/devices, which this Worker does not call,
+// and it asks the user for Spotify Connect device access on top of that.
+// `user-library-read` backed a library probe that has since been removed.
+const SCOPES = ["user-read-currently-playing", "user-library-modify"] as const;
 
 interface Credentials {
   clientId: string;

@@ -13,7 +13,8 @@
 
 ## 事前準備
 
-- 一個 Spotify 帳號（免費或付費皆可），按鈕會修改該帳號的收藏庫。
+- 一個 Spotify 帳號，按鈕會修改該帳號的收藏庫。**需要 Premium** —
+  見 [Development Mode 的限制](#development-mode-的限制)。
 - 已安裝 Node.js 並取得本專案原始碼（`npm install`）。
 - 已登入 Cloudflare 帳號的 Wrangler CLI（`npx wrangler login`）。
 - 一支安裝捷徑 App 的 iPhone。不需要動作按鈕——那只是其中一種觸發方式（見步驟 5）。
@@ -27,10 +28,21 @@
 
 ## 2. 取得 refresh token
 
-這是一次性的 OAuth authorization-code 交換流程，會請求剛好四個授權範圍（scope）：
-`user-read-currently-playing`、`user-read-playback-state`、`user-library-modify`、
-`user-library-read`。**授權範圍事後無法擴大，只能整個流程重做一次**，所以即使你覺得目前不需要
-`user-library-read`，也不要跳過任何一個。
+這是 OAuth authorization-code 交換流程，只請求兩個授權範圍（scope）— 剛好是 Worker
+實際會用到的，沒有多要：
+
+| Scope | 用途 |
+|---|---|
+| `user-read-currently-playing` | `GET /me/player/currently-playing` |
+| `user-library-modify` | `PUT /me/library`（歌曲與 podcast 單集都靠它） |
+
+早期版本多請求了兩個。`user-read-playback-state` 沒有任何程式碼路徑在用 — 它對應的是
+`GET /me/player` 和 `/me/player/devices`，這個 Worker 都不呼叫，而且還會額外向使用者索取
+Spotify Connect 裝置資訊的存取權。`user-library-read` 原本用來支撐一個「是否已收藏」的查詢，
+那個查詢已經移除，因為 `PUT /me/library` 本身是 idempotent，先查也不會改變要不要送出。
+
+授權範圍事後要擴大確實得重跑這個流程 — 但為了 refresh token，你本來就至少每 6 個月要重跑一次，
+所以沒有理由現在先多要。
 
 ### 方法 A：使用輔助腳本（建議）
 
@@ -54,7 +66,7 @@ code 換取 token。refresh token 會印到 stdout — 複製下來即可，過�
 1. 用目標帳號登入的瀏覽器打開下列網址（填入 `<CLIENT_ID>`）：
 
    ```
-   https://accounts.spotify.com/authorize?client_id=<CLIENT_ID>&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fcallback&scope=user-read-currently-playing%20user-read-playback-state%20user-library-modify%20user-library-read
+   https://accounts.spotify.com/authorize?client_id=<CLIENT_ID>&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fcallback&scope=user-read-currently-playing%20user-library-modify
    ```
 
 2. 同意授權後，瀏覽器會被導向 `http://127.0.0.1:8787/callback?code=<AUTH_CODE>`（因為沒有任何服務在監聽，畫面會顯示無法連線，這是正常的，直接從網址列複製 `<AUTH_CODE>` 即可）。
@@ -260,6 +272,25 @@ Spotify 端的偶發狀況，那是把我們自己漏參數的問題誤判到 Sp
 `wrangler secret put SHORTCUT_SECRET` 設定的值完全一致。這是唯一一種 Worker 會回傳非 200
 狀態碼的情況，其他所有失敗（Spotify 服務中斷、Spotify 授權過期、網路問題）都仍會被
 `顯示通知` 動作讀到，並顯示可理解的訊息。
+
+## Development Mode 的限制
+
+像這樣的個人 app 會一直留在 Spotify 的 **Development Mode**（Extended Quota Mode 是給
+服務大量使用者的 app 用的）。自 Spotify
+[2026 年 2 月的變更](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
+起，這個模式有幾個限制值得先知道，免得把時間花在查別的地方：
+
+- **App 擁有者必須有有效的 Spotify Premium 訂閱。** 訂閱失效 app 就會停止運作，重新訂閱
+  之後會恢復。這是唯一一種沒有專屬通知訊息的失敗原因 — 它會表現成
+  `操作未完成，請稍後再試`（`api_failed`）或是授權相關訊息，兩者都不會指向帳單問題。
+  所以如果按鈕突然壞掉而你什麼都沒改，先去檢查訂閱狀態。
+- **每位開發者 1 個 Client ID**、**每個 app 5 個使用者**。個人使用完全夠。已經超過的舊
+  app 會被沿用不受影響。
+- Development Mode 的 rate limit 比 Extended Quota Mode 低。這裡不構成問題：按一次最多
+  花 3 次 API 呼叫，而額度是
+  [30 秒滾動視窗](https://developer.spotify.com/documentation/web-api/concepts/rate-limits)計算的。
+
+內容已改寫以符合授權規範。
 
 ## 每 6 個月重新授權
 

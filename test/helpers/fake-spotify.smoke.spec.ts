@@ -49,7 +49,7 @@ describe("fake spotify harness smoke test", () => {
     expect(body.item.id).toBe("abc");
   });
 
-  it("models the library: PUT inserts, GET contains reads back", async () => {
+  it("models the library: PUT inserts the URI into the saved set", async () => {
     const fake = createFakeSpotify();
 
     const putRes = await fake.fetch(
@@ -58,13 +58,6 @@ describe("fake spotify harness smoke test", () => {
     );
     expect(putRes.status).toBe(200);
     expect(fake.library.has("spotify:track:abc123")).toBe(true);
-
-    const containsRes = await fake.fetch(
-      "https://api.spotify.com/v1/me/library/contains?uris=" +
-        encodeURIComponent("spotify:track:abc123,spotify:track:other"),
-      { method: "GET", headers: { Authorization: "Bearer tok" } },
-    );
-    expect(await containsRes.json()).toEqual([true, false]);
   });
 
   it("library PUT is idempotent under repeated invocation (model backing Property 6/7)", async () => {
