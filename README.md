@@ -111,6 +111,19 @@ copy it. Nothing is written to disk.
 > notification reads `Spotify authorization expired, please re-authorize`.
 > See [Re-authorizing every 6 months](#re-authorizing-every-6-months) for the
 > recovery procedure — note that it takes **two** commands, not one.
+>
+> **Set a calendar reminder now, while you are on this step.** Nothing will
+> warn you as the deadline approaches: Spotify does not expose the token's
+> issue date, and this Worker does not record when you authorized it, so the
+> first signal is a press that fails. Aim a week early:
+>
+> ```bash
+> date -v+6m -v-7d +%Y-%m-%d   # macOS
+> date -d '+6 months -7 days' +%Y-%m-%d   # Linux
+> ```
+>
+> Run that on the day you authorize and put the result in your calendar. The
+> reminder doubles as the record of when the authorization happened.
 
 ## 3. Provision the token-rotation KV namespace
 
