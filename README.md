@@ -211,8 +211,12 @@ In the iOS Shortcuts app, create a new shortcut with **three** actions, in order
    - URL: `https://<worker-name>.<subdomain>.workers.dev/like`
    - Method: `POST`
    - Headers: add one — key `Authorization`, value `Bearer <SHORTCUT_SECRET>`
-     (one space after `Bearer`; same value you set in step 4)
-   - Request Body: **None** (do not leave it on the default JSON)
+     (one space after `Bearer`; same value you set in step 4). This is the
+     only field that must be exactly right — see the troubleshooting note in
+     step 6 for what a wrong value looks like.
+   - Request Body: leave it alone. `None` and the default `JSON` with no
+     fields both work, because the Worker ignores the body entirely — there
+     is nothing for the caller to parameterize.
 2. **Get Dictionary Value**
    - Get: `Value`
    - Key: `message`
@@ -220,13 +224,19 @@ In the iOS Shortcuts app, create a new shortcut with **three** actions, in order
 3. **Show Notification**
    - Body: use the **Dictionary Value** variable from step 2 (not the whole
      "Contents of URL", which would render the raw JSON)
-   - Title: leave empty
-   - Attachment: **clear it** (remove "Contents of URL" if it was prefilled,
-     otherwise the notification carries a redundant JSON attachment)
+   - Title: can be left empty — the field is optional
+   - Attachment: leave empty. Anything here is harmless but shows nothing
+     useful, since the value is a plain string.
+   - Play Sound: taste. Useful if you trigger this without looking at the
+     screen.
 
-Without action 2, the notification shows the whole
+Only the **Body** of this action matters. Action 2 is the one step people
+miss: without it the notification shows the whole
 `{"message":"...","ok":true,"outcome":"added",...}` string instead of just the
-Chinese sentence.
+sentence.
+
+That is the entire shortcut — three actions, nothing conditional. The same
+three work unchanged as a second copy targeted at an Apple Watch.
 
 ### Triggering it (pick any — an Action Button is optional)
 
