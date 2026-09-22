@@ -37,10 +37,16 @@ export interface TrackInfo {
  * A currently-playing podcast episode. `name` is the episode's own title;
  * `show` is the podcast/show name — Spotify keeps these as two separate
  * fields (`item.name` vs `item.show.name`), and a "節目名稱 - 單集標題"
- * message needs both. `id` is null when Spotify reports a playing episode
- * without a full item object (`item: null` alongside
- * `currently_playing_type: "episode"`, observed in production) — there is
- * no episode id to add in that case, same as a local file.
+ * message needs both.
+ *
+ * `id` is null when a playing episode arrives without a full item object
+ * (`item: null` alongside `currently_playing_type: "episode"`) — there is no
+ * episode id to add, same as a local file. This was observed in production,
+ * but the cause was local, not Spotify's: the currently-playing request
+ * omitted `additional_types=track,episode`, which makes the endpoint report
+ * every episode with a null item. That parameter is now sent (see
+ * spotify/player.ts), so a null `id` here has no known trigger left. The
+ * field stays nullable as defence, not as an expected state.
  */
 export interface EpisodeInfo {
   id: string | null;

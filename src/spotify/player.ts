@@ -47,11 +47,18 @@ export async function getCurrentlyPlaying(token: string): Promise<Result<Playbac
   const type = payload.currently_playing_type;
 
   // An episode is reported through its own PlaybackState field, never
-  // through `track`. In practice Spotify sometimes reports a playing
-  // episode with `item: null` (no full item object), so this check MUST
-  // run before the `item === null` early-return below — checking `item`
-  // first would misclassify a playing episode as "nothing playing" instead
-  // of surfacing it as an (possibly not-addable) episode.
+  // through `track`. This check MUST run before the `item === null`
+  // early-return below: checking `item` first would misclassify a playing
+  // episode as "nothing playing" rather than surfacing it as an episode.
+  //
+  // That ordering was originally written for the `item: null` episode
+  // responses seen in production. Those turned out to be caused by this
+  // module's own missing `additional_types` parameter (see the URL above),
+  // not by the endpoint — with the parameter sent, a playing episode comes
+  // back with a populated item. The ordering is kept as defence rather
+  // than for that case: it costs nothing, and normalizeEpisode already
+  // tolerates a null item by yielding `id: null`, so an unforeseen empty
+  // item degrades to `not_addable` instead of the wrong "nothing playing".
   if (typeof type === "string" && type === "episode") {
     return ok({ track: null, episode: normalizeEpisode(payload.item) });
   }

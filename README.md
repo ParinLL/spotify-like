@@ -249,12 +249,19 @@ Try a few playback states to confirm all four outcomes render correctly:
 |---|---|---|
 | A normal track | `Liked: <name> - <artist>` | `已加入喜愛：<歌名> - <歌手>` |
 | A podcast episode | `Liked: <show> - <title>` | `已加入喜愛：<節目名稱> - <單集標題>` |
-| Nothing | `目前沒有播放中的歌曲` |
-| A local file | `目前播放的內容無法加入喜愛` |
+| Nothing | `Nothing is playing` | `目前沒有播放中的歌曲` |
+| A local file | `This item can't be added to your library` | `目前播放的內容無法加入喜愛` |
 
-A podcast can also land on "not addable" — when Spotify returns the episode
-without a full item object (`item: null`) there is no episode id to save. That
-is a Spotify-side condition; retrying usually succeeds.
+A local file is the only expected "not addable" case. Podcasts add normally.
+
+If a podcast ever reports "not addable", that is a bug worth reporting rather
+than retrying. The one known cause was the Worker omitting
+`additional_types=track,episode` from the currently-playing request: without
+it, Spotify answers with `item: null` for *every* episode, leaving no episode
+id to save ([spotify/web-api#1496](https://github.com/spotify/web-api/issues/1496)).
+That parameter is now sent, so this has no known trigger left — earlier
+versions of this README described it as an intermittent Spotify-side condition,
+which was a misdiagnosis of our own missing parameter.
 
 ### Message length
 

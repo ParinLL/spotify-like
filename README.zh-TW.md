@@ -223,11 +223,17 @@ Apple Watch 上執行沒問題——這個捷徑只用到「取得 URL 內容」
 |---|---|---|
 | 一般歌曲 | `已加入喜愛：<歌名> - <歌手>` | `Liked: <name> - <artist>` |
 | Podcast 單集 | `已加入喜愛：<節目名稱> - <單集標題>` | `Liked: <show> - <title>` |
-| 完全沒播放 | `目前沒有播放中的歌曲` |
-| 本機檔案（local file） | `目前播放的內容無法加入喜愛` |
+| 完全沒播放 | `目前沒有播放中的歌曲` | `Nothing is playing` |
+| 本機檔案（local file） | `目前播放的內容無法加入喜愛` | `This item can't be added to your library` |
 
-Podcast 偶爾也會落到「無法加入喜愛」——當 Spotify 沒有回傳該單集的完整資料
-（`item: null`）時就沒有 id 可以收藏，這是 Spotify API 端的狀況，重試通常就會正常。
+本機檔案是唯一預期會出現「無法加入喜愛」的情況。Podcast 可以正常加入。
+
+如果 podcast 出現「無法加入喜愛」，那是 bug，請回報而不是重試。唯一已知的原因是
+Worker 在呼叫 currently-playing 時漏了 `additional_types=track,episode` 參數：少了它，
+Spotify 對**所有**單集都會回 `item: null`，於是沒有 id 可以收藏
+（[spotify/web-api#1496](https://github.com/spotify/web-api/issues/1496)）。
+現在這個參數已經帶上，所以沒有已知的觸發條件了 — 這份 README 之前把它寫成
+Spotify 端的偶發狀況，那是把我們自己漏參數的問題誤判到 Spotify 身上。
 
 ### 訊息長度
 
