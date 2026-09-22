@@ -47,9 +47,16 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # 鎖定與 package.json devDependencies 一致的版本，避免 CI 部署用的
-          # wrangler 跟本機/測試安裝的版本產生落差。升級時三處一起改：
-          # package.json 的 wrangler、@cloudflare/vitest-pool-workers（測試
-          # 內部仍會用它自己巢狀鎖定的版本，無法強制一致，屬已知限制），以及此處。
-          wranglerVersion: '4.135.0'
+          # 部署一律使用最新發佈的 wrangler。
+          #
+          # 必須明寫 'latest'：wrangler-action 的文件說明，若省略這個輸入而環境
+          # 中已經有 wrangler，它會沿用既有安裝 —— 而上面的 npm ci 已經依
+          # package-lock.json 裝好一份，所以省略反而會變成「用 lockfile 鎖定的
+          # 版本」，不是最新版。
+          #
+          # 代價（已知並接受）：上面的測試跑的是 lockfile 裡那份 wrangler，
+          # 部署用的是另一份。所以最新版若有破壞性變更，測試不會攔到，第一個
+          # 出問題的地方就是這個部署步驟。將來若不想承擔 major 版跳版風險，
+          # 把值改成 '4' 即可 —— 一樣自動拿 4.x 最新，但不會跨到 v5。
+          wranglerVersion: 'latest'
           command: deploy
