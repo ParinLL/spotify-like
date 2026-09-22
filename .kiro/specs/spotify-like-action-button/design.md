@@ -2,9 +2,9 @@
 
 ## Overview
 
-A single Cloudflare Worker endpoint turns one Action Button press into one "save currently playing item to Liked Songs" operation on one personal Spotify account, and answers with a Traditional Chinese sentence short enough to read in a notification banner. The item is a track or a podcast episode; both are saved, with their own message wording.
+A single Cloudflare Worker endpoint turns one Action Button press into one "save currently playing item to Liked Songs" operation on one personal Spotify account, and answers with a sentence in the configured language — English by default, Traditional Chinese optionally — short enough to read in a notification banner. The item is a track or a podcast episode; both are saved, with their own message wording.
 
-The Worker is stateless. Every invocation exchanges the stored refresh token for a fresh access token, reads the currently playing item, and issues an add-only `PUT` against the library using Spotify's current `/me/library` endpoint, which replaced the now-removed `/me/tracks`. There is no database, no session, no per-user record, and no queue. The only persisted state is three values in Cloudflare Worker Secrets plus one shared secret used to authenticate the Shortcut itself.
+The Worker is stateless. Every invocation exchanges the stored refresh token for a fresh access token, reads the currently playing item, and issues an add-only `PUT` against the library using Spotify's current `/me/library` endpoint, which replaced the now-removed `/me/tracks`. There is no database, no session, no per-user record, and no queue. The persisted state is the credential and nothing else: three values in Cloudflare Worker Secrets, one shared secret used to authenticate the Shortcut itself, and — once Spotify rotates the refresh token — the rotated token under `refresh_token` plus its rotation timestamp under `rotated_at` in the `TOKEN_KV` namespace. Stateless here means correctness never depends on cached or stored state beyond that credential.
 
 Two design constraints shape everything below:
 
@@ -54,7 +54,7 @@ sequenceDiagram
 
 ### Why stateless
 
-An access token lives about an hour, and a press happens a handful of times a day. Caching a token in KV would add a storage binding, a write on most invocations, and a stale-token failure mode, to save roughly 150 ms on an interaction that is already asynchronous from the user's point of view. The design instead keeps a best-effort in-memory cache in module scope: if the isolate happens to be warm the token is reused, otherwise a fresh exchange runs. Correctness never depends on the cache, which is what makes the stale-token retry (below) sufficient.
+An access token lives about an hour, and a press happens a handful of times a day. Caching the access token in KV would add a write on most invocations and a stale-token failure mode, to save roughly 150 ms on an interaction that is already asynchronous from the user's point of view. The storage binding is no longer a cost either way: `TOKEN_KV` is already bound so that a rotated refresh token can be persisted. The design instead keeps a best-effort in-memory cache of the access token in module scope: if the isolate happens to be warm the token is reused, otherwise a fresh exchange runs. Correctness never depends on the cache, which is what makes the stale-token retry (below) sufficient.
 
 ## Components and Interfaces
 
@@ -233,7 +233,7 @@ The orchestrator builds the URI from the item's id and passes it to `saveTrack`,
 
 The standing argument for keeping it — that scopes cannot be widened without redoing the authorization-code flow, so ask for everything up front — is void, and its reversal is why the narrowing became worth doing. Widening still requires repeating that flow; what changed is that the flow is already repeated at least twice a year because the refresh token expires after 6 months (see the setup procedure). Deferring a scope until something actually needs it therefore costs approximately nothing.
 
-Using `/me/library` for the save satisfies requirement 3.4 directly, and there is no fallback to a removed endpoint anywhere in the module. Requirement 3.5 is a different matter: it specifies the saved-status check and names the `user-library-read` scope it needs, and neither is implemented any more. The shipped scope request is narrower than requirement 3.3's four-scope list too. As with requirement 1.5 and podcast episodes, the code is what runs; reconciling 3.3 and 3.5 with the shipped scopes is a requirements change that has not been made.
+Using `/me/library` for the save satisfies requirement 3.4 directly, and there is no fallback to a removed endpoint anywhere in the module. Requirement 3.5 specifies the same shape as the code: the Worker relies on the save endpoint's idempotence and does not query the Spotify API for the saved status of the item, which is exactly what removing `isTrackSaved` left behind. Requirement 3.3 likewise specifies exactly the two scopes the flow requests, so the narrowing described above is the specified behavior rather than a divergence from it.
 
 ### `spotify/http.ts` — the call wrapper
 
@@ -330,7 +330,7 @@ No body, no query parameters. Anything sent is ignored — there is nothing for 
 
 ### Response
 
-Always `application/json`, with `message` as the field the Shortcut reads:
+Always `application/json`, with `message` as the field the Shortcut reads. The examples below show the `zh_TW` rendering; only `message` varies with the configured language, and the structured fields do not.
 
 ```json
 {
@@ -376,7 +376,7 @@ Business outcomes return `200` even when they represent a Spotify failure. The S
 | `not_found` | 404 | Wrong path |
 | `method_not_allowed` | 405 | Wrong verb |
 
-The trade-off: if the Shortcut's own secret is wrong, the user sees an iOS action error rather than a Chinese message. That is a setup-time mistake that surfaces on the first press and is worth an honest 401 rather than a soft 200 for every drive-by request. The setup procedure below calls out this specific symptom.
+The trade-off: if the Shortcut's own secret is wrong, the user sees an iOS action error rather than a message from the Worker. That is a setup-time mistake that surfaces on the first press and is worth an honest 401 rather than a soft 200 for every drive-by request. The setup procedure below calls out this specific symptom.
 
 ## Error Handling and Message Mapping
 
@@ -389,21 +389,21 @@ Language is threaded as an argument rather than held in module scope. A Worker i
 | Condition | Outcome | Message | Requirement |
 |---|---|---|---|
 | Track added (new or already liked) | `added` | `已加入喜愛：<歌名> - <歌手>` (歌手 truncated to 28 display columns; 歌名 in full) | 1.3, 2.2 |
-| Podcast episode added (new or already liked) | `episode_added` | `已加入喜愛：<節目名稱> - <單集標題>` (節目名稱 truncated to 28 display columns; 單集標題 in full) | derived — see below |
+| Podcast episode added (new or already liked) | `episode_added` | `已加入喜愛：<節目名稱> - <單集標題>` (節目名稱 truncated to 28 display columns; 單集標題 in full) | 1.6, 1.7 |
 | 204 / `item: null` under a non-`episode` type / ad / unknown type | `nothing_playing` | `目前沒有播放中的歌曲` | 1.4 |
-| Playing item has no addable id: a local file, or (defensively) a track or episode arriving with a null id | `not_addable` | `目前播放的內容無法加入喜愛` | 1.5, local-file half only |
+| Playing item has no addable id: a local file, or (defensively) a track or episode arriving with a null id | `not_addable` | `目前播放的內容無法加入喜愛` | 1.5 |
 | Token exchange returns any 4xx (incl. `400 invalid_grant` from a revoked *or expired* refresh token) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
 | Data call returns 401 or 403 (after one retry) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
 | Any other Spotify status ≥ 400, including 429 and 5xx | `api_failed` | `操作未完成，請稍後再試` | 4.3 |
 | Response body is not the expected shape | `api_failed` | `操作未完成，請稍後再試` | 4.3 |
 | `fetch` throws: DNS, TLS, reset, timeout/abort | `network_failed` | `無法連線到 Spotify，請檢查網路連線` | 4.4 |
 | A required secret binding is absent or empty | `misconfigured` | `伺服器設定不完整，請檢查 Worker 設定` | derived |
-| `MESSAGE_LANGUAGE` is set to a non-empty value other than `en` or `zh_TW` | `misconfigured` | the same message, rendered in the default language | derived |
+| `MESSAGE_LANGUAGE` is set to a non-empty value other than `en` or `zh_TW` | `misconfigured` | the same message, rendered in the default language | 7.3, 7.4 |
 | Bearer secret missing or wrong | `unauthorized` | `未授權的請求` | derived (5.4, 5.5) |
 
-**Derived cases.** Four rows, covering three outcomes, have no acceptance criterion directly behind them. `misconfigured` and `unauthorized` exist because the Worker must answer *something* for requirement 4.1's totality, and silently treating a missing binding as an auth failure would send the operator to re-authorize Spotify when the actual fix is `wrangler secret put`. The unrecognized-`MESSAGE_LANGUAGE` row is the same outcome reached from a different cause, and it reports in the default language because that is the only language the Worker can be sure it has.
+**Derived cases.** Two rows, covering two outcomes, have no acceptance criterion directly behind them: `misconfigured` reached from a missing or empty secret binding, and `unauthorized`. Both exist because the Worker must answer *something* for requirement 4.1's totality, and silently treating a missing binding as an auth failure would send the operator to re-authorize Spotify when the actual fix is `wrangler secret put`.
 
-`episode_added` is the fourth, and it is derived in a stronger sense: requirement 1.5 does not merely omit it, it says the opposite — a podcast episode is named there, alongside a local file, as content the Worker should report as not addable. Episode support shipped without a requirements change, so the code and 1.5 now disagree on podcasts, and the code is what runs. What the row is traced to is requirement 4.1's totality: a playing episode is an outcome the Worker must answer with some displayable message, and `episode_added` with the show/title template is the answer it gives. Requirement 1.5 still governs its other half, the local file, which is why the `not_addable` row cites it for that half alone. Reconciling 1.5 with the shipped behavior is a requirements change that has not been made.
+Every other row traces. `episode_added` is requirements 1.6 and 1.7: 1.6 requires an episode carrying an addable identifier to be added to Liked Songs, and 1.7 gives its message — the lead-in, then the show name truncated to 28 display columns, then the episode title in full. The `not_addable` row is requirement 1.5 in whole rather than in half: 1.5 covers a local file or an item reported without an identifier, which is exactly the set of cases this row collects. The unrecognized-`MESSAGE_LANGUAGE` row is requirements 7.3 and 7.4: 7.3 requires the configuration message with zero Spotify calls, and 7.4 requires that message to be rendered in `en`, which is why it reports in the default language rather than in the language that was misconfigured.
 
 **429 is not retried.** A rate limit from a single-user personal integration means something is wrong (a stuck automation, a repeated press), and sleeping inside the request would push the Shortcut past its timeout. "Try again later" is the honest answer.
 
@@ -466,7 +466,7 @@ The change applies to the user-authorized flows — Authorization Code, which th
 
 **Two scopes are requested, narrowed from four — and the reason for asking for four has been reversed.** The authorize URL above requests `user-read-currently-playing`, for `GET /me/player/currently-playing`, and `user-library-modify`, for `PUT /me/library` (which covers episodes as well as tracks). Dropped were `user-read-playback-state`, which no code path ever used — it covers `GET /me/player` and `GET /me/player/devices`, neither of which this Worker calls, and it additionally asks the user for Spotify Connect device access — and `user-library-read`, which backed only the saved-status probe that has since been removed.
 
-The old justification was that scopes cannot be widened without repeating this flow, so it is cheaper to ask for everything up front. Widening does still require repeating the flow. But the 6-month expiry documented just above means the flow is repeated at least twice a year regardless, so deferring a scope until something needs it costs approximately nothing — and the cost of not deferring is a permission granted for years to code that never calls it. That reversal is the reason the narrowing was worth doing. Note that requirement 3.3 still lists four scopes; the shipped request is the narrower one.
+The old justification was that scopes cannot be widened without repeating this flow, so it is cheaper to ask for everything up front. Widening does still require repeating the flow. But the 6-month expiry documented just above means the flow is repeated at least twice a year regardless, so deferring a scope until something needs it costs approximately nothing — and the cost of not deferring is a permission granted for years to code that never calls it. That reversal is the reason the narrowing was worth doing. Requirement 3.3 specifies exactly these two scopes.
 
 ### 3. Set the Worker secrets
 
@@ -495,7 +495,7 @@ The notification language is optional and is *not* a secret. It goes in `wrangle
 MESSAGE_LANGUAGE = "zh_TW"   # "en" (the default) or "zh_TW"
 ```
 
-Omitting the var, or leaving it empty, gives English. Any other non-empty value makes every press answer `伺服器設定不完整，請檢查 Worker 設定` (in English, the default language) until it is corrected, rather than quietly answering in a language nobody asked for.
+Omitting the var, or leaving it empty, gives English. Any other non-empty value makes every press answer the `misconfigured` message rendered in the default language (`Worker configuration is incomplete, please check the settings`) until it is corrected, rather than quietly answering in a language nobody asked for.
 
 ### 4. Configure the Shortcut
 
@@ -511,7 +511,7 @@ In the Shortcuts app, create a shortcut with two actions:
 
 Then bind it: **Settings → Action Button → Shortcut**, and select this shortcut.
 
-Verify by playing a song and pressing the button. Expected banner: `已加入喜愛：<歌名> - <歌手>`. If iOS shows a generic "the action failed" dialog instead of a Chinese message, the `Authorization` header is wrong — that is the one case where the Worker answers with a non-200 status.
+Verify by playing a song and pressing the button. Expected banner: the success message in the configured language — `Liked: <name> - <artist>` on a default deployment, or `已加入喜愛：<歌名> - <歌手>` where `MESSAGE_LANGUAGE` is `zh_TW`. If iOS shows a generic "the action failed" dialog instead of a success banner, the `Authorization` header is wrong — that is the one case where the Worker answers with a non-200 status.
 
 ### Development Mode constraints
 
@@ -543,23 +543,23 @@ Paraphrased from the [February 2026 changelog](https://developer.spotify.com/doc
 
 ### Property 3: The success message is the template instantiated with the track's name and artist, with only the artist truncated to the attribution budget
 
-*For any* track name and artist name, a successful add returns the message `已加入喜愛：<name> - <artist>` where the track name appears verbatim and only the artist is truncated to at most 28 display columns — an ellipsis (`…`) appended only when truncation actually occurred, and an artist that already fits passed through byte-for-byte — unchanged by JSON serialization, for all string content including CJK characters, emoji, surrounding whitespace, and names that themselves contain `" - "`.
+*For any* track name and artist name, a successful add returns the configured language's success template instantiated — `已加入喜愛：<name> - <artist>` for `zh_TW`, shown here and throughout this property — where the track name appears verbatim and only the artist is truncated to at most 28 display columns — an ellipsis (`…`) appended only when truncation actually occurred, and an artist that already fits passed through byte-for-byte — unchanged by JSON serialization, for all string content including CJK characters, emoji, surrounding whitespace, and names that themselves contain `" - "`.
 
 **Amended:** this property originally asserted the message was the template instantiated with the raw name and artist. Truncation was added afterwards because iOS truncates a long notification banner *from the tail*. It applies only to the attribution field — the artist for a track, the show name for a podcast episode — and never to the title, so that what is lost to iOS's own truncation is the secondary field rather than the item the reader is trying to identify; an uncapped show name would otherwise consume the banner before the episode title started. The budget is measured in display columns rather than characters because CJK text is full-width: 28 columns is ~14 Han characters or ~28 Latin characters, giving both scripts the same visual length, where a fixed character count would leave Latin text with half the information. The constant is named `MAX_ATTRIBUTION_COLUMNS` to reflect that it governs the attribution field alone. The budget is 28 rather than a smaller number because it is sized against the notification banner, which fits roughly 38-40 columns per line over two lines: the lead-in (`已加入喜愛：` is 12 columns, `Liked: ` is 7), a 28-column attribution, and the ` - ` separator (3 columns) leave most of the second line for the title. One budget serves both languages, which is exactly what measuring in display columns buys — a character count would have needed a per-language number. Truncation applies only to the human-facing `message`; the structured `track` / `episode` fields in the response body keep their full untruncated values.
 
-**Validates: Requirements 1.3, 2.2**
+**Validates: Requirements 1.3, 1.8, 2.2**
 
 ### Property 4: Every "no track" signal maps to the nothing-playing message and writes nothing
 
-*For any* response in the no-track family — HTTP 204, an empty body, `item: null` under a `currently_playing_type` other than `episode`, or a `currently_playing_type` of `ad` or `unknown` — the Worker returns exactly `目前沒有播放中的歌曲` and issues no request against `/me/library`.
+*For any* response in the no-track family — HTTP 204, an empty body, `item: null` under a `currently_playing_type` other than `episode`, or a `currently_playing_type` of `ad` or `unknown` — the Worker returns exactly the configured language's nothing-playing message (`目前沒有播放中的歌曲` for `zh_TW`) and issues no request against `/me/library`.
 
 **Validates: Requirements 1.4**
 
 ### Property 5: A not-addable current track is reported distinctly and writes nothing
 
-*For any* currently-playing payload whose item has a null id — a local file, or a track or episode arriving without an addable id — the Worker returns exactly `目前播放的內容無法加入喜愛` and issues no request against `/me/library`.
+*For any* currently-playing payload whose item has a null id — a local file, or a track or episode arriving without an addable id — the Worker returns exactly the configured language's not-addable message (`目前播放的內容無法加入喜愛` for `zh_TW`) and issues no request against `/me/library`.
 
-**Amended:** this property originally read "whose track has a null id (a podcast episode or a local file)", which is no longer true of episodes. Podcast episodes were not-addable by design at the time, matching requirement 1.5, and `PlaybackState` carried a single `track` field that an episode was folded into with a null id. Episode support shipped afterwards: an episode now has its own `EpisodeInfo`, its own `episode_added` outcome, and its own show/title message, so the only remaining unconditional not-addable case is a local file. The null-id episode clause survives only as defence. What made every episode look not-addable in production was not Spotify but this design's own currently-playing request omitting `additional_types=track,episode`, which makes the endpoint report an episode with `item: null`; with the parameter sent, a playing episode arrives with a populated item and an id, and reaches Property 13 instead of this one.
+**Amended:** this property originally read "whose track has a null id (a podcast episode or a local file)", which is no longer true of episodes. Podcast episodes were not-addable by design at the time, matching requirement 1.5 *as then written* — it named a podcast episode alongside a local file as content to report as not addable — and `PlaybackState` carried a single `track` field that an episode was folded into with a null id. Episode support shipped afterwards: an episode now has its own `EpisodeInfo`, its own `episode_added` outcome, and its own show/title message, so the only remaining unconditional not-addable case is a local file. Requirement 1.5 has since been rewritten to match, covering a local file or an item reported without an identifier and no longer naming episodes, and requirements 1.6 and 1.7 cover the episode path. The null-id episode clause survives only as defence. What made every episode look not-addable in production was not Spotify but this design's own currently-playing request omitting `additional_types=track,episode`, which makes the endpoint report an episode with `item: null`; with the parameter sent, a playing episode arrives with a populated item and an id, and reaches Property 13 instead of this one.
 
 **Validates: Requirements 1.5**
 
@@ -603,17 +603,17 @@ Paraphrased from the [February 2026 changelog](https://developer.spotify.com/doc
 
 *For any* recognized `MESSAGE_LANGUAGE` value crossed with *any* Spotify behavior, every message the Worker returns on `/like` is a member of that language's catalog or that language's success template instantiated, and never a string from another language's catalog; and *for any* non-empty value that is not a recognized language, the Worker returns the `misconfigured` outcome rendered in the default language and issues zero outbound Spotify requests, regardless of how near a miss the value is (differing only in case, or using `zh-TW` rather than `zh_TW`). An absent or empty value behaves as the default language.
 
-The two routing messages are outside the scope of this property: they are untranslated protocol reason phrases and belong to no catalog. The unrecognized-value half is a derived case in the same sense as the `misconfigured` row of the mapping table — no acceptance criterion names `MESSAGE_LANGUAGE` — so what is traced here is requirement 4.1's totality: whatever the configuration, the response still carries a message the Shortcut can display.
+The two routing messages are outside the scope of this property: they are untranslated protocol reason phrases and belong to no catalog. Each half of the property is traced: the recognized-value half is requirement 7.1 and the absent-or-empty case is 7.2, while the unrecognized-value half is 7.3 (the configuration message, with no Spotify call) crossed with 7.4 (that message rendered in `en`).
 
-**Validates: Requirements 4.1**
+**Validates: Requirements 7.1, 7.2, 7.3, 7.4**
 
 ### Property 13: A playing podcast episode is saved as an episode URI and reported with the show/title message
 
-*For any* currently-playing payload whose `currently_playing_type` is `episode` and whose item carries a non-null id, the Worker issues exactly one `PUT` to `/me/library` whose `uris` parameter is that id as a `spotify:episode:<id>` URI — never `spotify:track:<id>` — and returns the outcome `episode_added` with the message `已加入喜愛：<節目名稱> - <單集標題>`, the show name truncated to the attribution budget and the episode title in full, regardless of the payload's other fields.
+*For any* currently-playing payload whose `currently_playing_type` is `episode` and whose item carries a non-null id, the Worker issues exactly one `PUT` to `/me/library` whose `uris` parameter is that id as a `spotify:episode:<id>` URI — never `spotify:track:<id>` — and returns the outcome `episode_added` with the configured language's episode success template instantiated (`已加入喜愛：<節目名稱> - <單集標題>` for `zh_TW`), the show name truncated to the attribution budget and the episode title in full, regardless of the payload's other fields.
 
-**Derived, not traced.** No acceptance criterion covers this: episode support shipped without a requirements change, and requirement 1.5 states the contrary — that a podcast episode is content the Worker reports as not addable. This property is labelled derived in the same sense as the `misconfigured` and `unauthorized` rows of the mapping table, and what it traces to is requirement 4.1's totality: a playing episode must produce some displayable message. It is recorded here because it is the behavior that ships and is tested, and because leaving it implicit would let the contradiction with 1.5 go unnoticed a second time.
+Both halves are traced: requirement 1.6 requires an episode carrying an addable identifier to be added to Liked Songs, which is what the episode URI on `/me/library` does, and requirement 1.7 gives the message — the lead-in, the show name truncated to the attribution budget, then the episode title in full. Episode support shipped ahead of those criteria, at a time when requirement 1.5 named a podcast episode as not-addable content; 1.5 has since been rewritten and 1.6 / 1.7 added, so the property and the requirements now agree.
 
-**Validates: Requirements 4.1**
+**Validates: Requirements 1.6, 1.7**
 
 ## Testing Strategy
 
@@ -629,8 +629,8 @@ Property 6 and Property 7 are model-based: the fake Spotify keeps a `Set<string>
 
 The fake's modelled endpoints are the three the Worker calls: the token exchange, currently-playing, and the `/me/library` add. Its `GET /me/library/contains` route was removed along with `isTrackSaved`, deliberately rather than as cleanup — a fake answering `200` for an endpoint the Worker is no longer scoped for would let a re-added call pass the whole suite and then `403` in production. An unmodelled endpoint failing loudly in tests is the safer default.
 
-**Unit tests** stay few and cover what properties cannot: the scope constant in the authorize URL, which is now exactly `user-read-currently-playing` and `user-library-modify` — the test asserts the two that ship, not requirement 3.3's four — that the save targets `/me/library` rather than the removed `/me/tracks` (3.4), the stale-token retry issuing exactly one re-exchange and stopping after one retry, and the paused-track decision. The saved-status-probe tests went with `isTrackSaved`.
+**Unit tests** stay few and cover what properties cannot: the scope constant in the authorize URL, which is now exactly `user-read-currently-playing` and `user-library-modify` — the two requirement 3.3 specifies (3.3) — that the save targets `/me/library` rather than the removed `/me/tracks` (3.4), the stale-token retry issuing exactly one re-exchange and stopping after one retry, and the paused-track decision. The saved-status-probe tests went with `isTrackSaved`.
 
-**Smoke tests** cover configuration, which has no input to vary: one test per missing or empty secret binding asserting the `misconfigured` message with no Spotify call (3.2), and a CI step grepping the tree for hardcoded credential literals and for a committed `.dev.vars` (5.3, and the static half of 5.2).
+**Smoke tests** cover configuration, which has no input to vary: one test per missing or empty secret binding asserting the `misconfigured` message with no Spotify call (3.2), one asserting the same outcome in the default language for an unrecognized `MESSAGE_LANGUAGE` (7.3, 7.4), and a CI step grepping the tree for hardcoded credential literals and for a committed `.dev.vars` (5.3, and the static half of 5.2).
 
-**Manual verification** closes the loop the harness cannot reach (6.4): after deploy, press the Action Button with a track playing, with playback stopped, and with a podcast playing, and confirm the three expected banners — the third being the `已加入喜愛：<節目名稱> - <單集標題>` success message, not the not-addable one. A podcast press answering `目前播放的內容無法加入喜愛` is the specific symptom of the currently-playing request having lost its `additional_types=track,episode` parameter, and this is the only check that catches that regression against the live endpoint.
+**Manual verification** closes the loop the harness cannot reach (6.4): after deploy, press the Action Button with a track playing, with playback stopped, and with a podcast playing, and confirm the three expected banners in the deployment's configured language — the third being the episode success message (`已加入喜愛：<節目名稱> - <單集標題>` for `zh_TW`, `Liked: <show> - <title>` for `en`), not the not-addable one. A podcast press answering the not-addable message instead (`目前播放的內容無法加入喜愛` for `zh_TW`) is the specific symptom of the currently-playing request having lost its `additional_types=track,episode` parameter, and this is the only check that catches that regression against the live endpoint.
