@@ -65,8 +65,8 @@ afterEach(() => {
 describe("getAccessToken — Effective_Refresh_Token", () => {
   it(
     "Feature: spotify-like-action-button-token-rotation, Property 3: The effective refresh token prefers Token_Store and falls back to the Secret",
-    () => {
-      fc.assert(
+    async () => {
+      await fc.assert(
         fc.asyncProperty(
           refreshTokenArb,
           refreshTokenArb,

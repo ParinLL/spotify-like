@@ -51,8 +51,8 @@ afterEach(() => {
 describe("getAccessToken", () => {
   it(
     "Feature: spotify-like-action-button-token-rotation, Property 7: A Token_Store read failure degrades to the same behavior as an empty Token_Store",
-    () => {
-      fc.assert(
+    async () => {
+      await fc.assert(
         fc.asyncProperty(secretRefreshTokenArb, async (secretRefreshToken) => {
           // Cold cache: force the exchange to actually happen for this run.
           invalidateAccessToken();

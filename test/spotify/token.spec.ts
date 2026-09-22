@@ -42,8 +42,8 @@ afterEach(() => {
 describe("getAccessToken", () => {
   it(
     "Feature: spotify-like-action-button, Property 1: Token exchange uses the refresh-token grant with the stored credentials",
-    () => {
-      fc.assert(
+    async () => {
+      await fc.assert(
         fc.asyncProperty(
           credentialArb,
           credentialArb,
