@@ -76,17 +76,40 @@ copy it. Nothing is written to disk.
      -d redirect_uri=http://127.0.0.1:8787/callback
    ```
 
-4. Copy the `refresh_token` field from the JSON response. It does not
-   expire on its own — it's invalidated only by revoking the app's access
-   or changing the account password. Discard the `access_token`; the
-   Worker mints its own on every request.
+4. Copy the `refresh_token` field from the JSON response. Discard the
+   `access_token`; the Worker mints its own on every request.
+
+> [!IMPORTANT]
+> **The refresh token expires 6 months after you authorize the app**, so
+> this step is not one-time — you have to redo it at least every 6 months.
+>
+> The clock starts at the moment of authorization and **refreshing does not
+> extend it**: per [Spotify's refresh token
+> documentation](https://developer.spotify.com/documentation/web-api/tutorials/refreshing-tokens),
+> the lifetime is measured from the original authorization, not from the last
+> refresh. Spotify [introduced this in June
+> 2026](https://developer.spotify.com/blog/2026-06-18-refresh-token-expiration);
+> refresh tokens used to last indefinitely. Content was rephrased for
+> compliance with licensing restrictions.
+>
+> When it expires, the token endpoint returns `400 invalid_grant` and the
+> notification reads `Spotify authorization expired, please re-authorize`.
+> See [Re-authorizing every 6 months](#re-authorizing-every-6-months) for the
+> recovery procedure — note that it takes **two** commands, not one.
 
 ## 3. Provision the token-rotation KV namespace
 
 The Worker persists a Spotify-issued replacement refresh token to a
 Cloudflare Workers KV namespace (`TOKEN_KV`) instead of discarding it, so
 the button keeps working even if Spotify rotates the refresh token behind
-the scenes. Before the first real deploy, create the namespace:
+the scenes.
+
+This handles Spotify *replacing* a token mid-life. It does **not** extend
+the 6-month authorization lifetime — a replacement token inherits the same
+expiry as the one it replaces, because that expiry is tied to the original
+authorization. Rotation and expiry are separate things.
+
+Before the first real deploy, create the namespace:
 
 ```bash
 npx wrangler kv namespace create spotify-like-token-store
@@ -268,7 +291,29 @@ is the one outcome the Worker answers with a non-200 status, so every other
 failure (Spotify down, expired Spotify authorization, network issues) still
 reaches `Show Notification` with a readable message.
 
+## Re-authorizing every 6 months
+
+When the notification says `Spotify authorization expired, please
+re-authorize` (or `Spotify 授權已失效，請重新取得授權`), the 6-month refresh
+token lifetime has run out. Redo step 2 to get a new refresh token, then run
+**both** of these:
+
+```bash
+npx wrangler secret put SPOTIFY_REFRESH_TOKEN          # the new token
+npx wrangler kv key delete refresh_token --binding TOKEN_KV --remote
+```
+
+The second command is the one that is easy to miss. The Worker prefers the
+KV-stored rotated token over the `SPOTIFY_REFRESH_TOKEN` secret, so as long
+as the expired value is still in KV it keeps winning and the Worker keeps
+failing — updating the secret alone changes nothing. Deleting the key makes
+the Worker fall back to the secret you just set, and the next rotation
+repopulates KV.
+
+To confirm it worked, press the Shortcut: a successful add means the new
+authorization is live.
+
 ## Rotating or revoking access
 
 - **Rotate the shortcut secret:** run `wrangler secret put SHORTCUT_SECRET` again with a new value, then update the header in the Shortcut.
-- **Revoke Spotify access:** remove the app's access from your [Spotify account access list](https://www.spotify.com/account/apps/), then redo step 2 and `wrangler secret put SPOTIFY_REFRESH_TOKEN` with the new token.
+- **Revoke Spotify access:** remove the app's access from your [Spotify account access list](https://www.spotify.com/account/apps/). To start using it again afterwards, follow [Re-authorizing every 6 months](#re-authorizing-every-6-months) — including the KV deletion.

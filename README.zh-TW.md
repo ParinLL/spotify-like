@@ -68,13 +68,33 @@ code 換取 token。refresh token 會印到 stdout — 複製下來即可，過�
      -d redirect_uri=http://127.0.0.1:8787/callback
    ```
 
-4. 從回應 JSON 中複製 `refresh_token` 欄位。它不會自動過期，只有在撤銷 app 授權或變更帳號密碼時才會失效。`access_token` 可以捨棄，因為 Worker 每次都會自己重新取得。
+4. 從回應 JSON 中複製 `refresh_token` 欄位。`access_token` 可以捨棄，因為 Worker 每次都會自己重新取得。
+
+> [!IMPORTANT]
+> **refresh token 會在你授權後 6 個月過期**，所以這個步驟不是一次性的 —
+> 至少每 6 個月要重做一次。
+>
+> 計時從授權那一刻開始，而且**重新整理 token 不會延長它**：依照
+> [Spotify 官方文件](https://developer.spotify.com/documentation/web-api/tutorials/refreshing-tokens)，
+> 這個期限是從原始授權算起，不是從最後一次 refresh 算起。這是 Spotify
+> [2026 年 6 月才加上的限制](https://developer.spotify.com/blog/2026-06-18-refresh-token-expiration)，
+> 以前的 refresh token 是不會過期的。內容已改寫以符合授權規範。
+>
+> 過期時 token 端點會回 `400 invalid_grant`，通知會顯示
+> `Spotify 授權已失效，請重新取得授權`。復原步驟見
+> [每 6 個月重新授權](#每-6-個月重新授權) — 注意需要**兩個**指令，不是一個。
 
 ## 3. 建立 token 更新用的 KV 命名空間
 
 Worker 會把 Spotify 發出的新 refresh token 存進一個 Cloudflare Workers KV
 命名空間（`TOKEN_KV`），而不是直接丟棄，這樣即使 Spotify 在背後更新了
-refresh token，按鈕也能繼續正常運作。第一次真正部署之前，先建立這個命名空間：
+refresh token，按鈕也能繼續正常運作。
+
+這解決的是 Spotify 在效期內「換發」token 的情況，**不會**延長那 6 個月的授權期限 —
+換發的新 token 繼承的是同一個到期時間，因為那個期限綁在原始授權上。換發和過期
+是兩件不同的事。
+
+第一次真正部署之前，先建立這個命名空間：
 
 ```bash
 npx wrangler kv namespace create spotify-like-token-store
@@ -235,8 +255,25 @@ Podcast 偶爾也會落到「無法加入喜愛」——當 Spotify 沒有回傳
 狀態碼的情況，其他所有失敗（Spotify 服務中斷、Spotify 授權過期、網路問題）都仍會被
 `顯示通知` 動作讀到，並顯示可理解的訊息。
 
+## 每 6 個月重新授權
+
+當通知顯示 `Spotify 授權已失效，請重新取得授權` 時，代表那 6 個月的 refresh token
+效期到了。重做步驟 2 取得新的 refresh token，然後**兩個指令都要執行**：
+
+```bash
+npx wrangler secret put SPOTIFY_REFRESH_TOKEN          # 填入新的 token
+npx wrangler kv key delete refresh_token --binding TOKEN_KV --remote
+```
+
+第二個指令是最容易漏掉的一步。Worker 讀取 refresh token 時，KV 裡存的換發值
+優先於 `SPOTIFY_REFRESH_TOKEN` secret，所以只要過期的舊值還在 KV 裡就會繼續
+勝出、Worker 也會繼續失敗 — 只更新 secret 完全沒有用。把那個 key 刪掉，Worker
+才會退回你剛設定的 secret，之後下一次換發會重新寫回 KV。
+
+確認方式：按一下捷徑，成功加入就表示新授權生效了。
+
 ## 更換或撤銷授權
 
 - **更換捷徑密鑰：** 重新執行 `wrangler secret put SHORTCUT_SECRET` 設定新值，再更新捷徑中的標頭。
-- **撤銷 Spotify 授權：** 到 [Spotify 帳號授權應用程式清單](https://www.spotify.com/account/apps/) 移除該 app 的授權，然後重做步驟 2，並用新的 token 執行
-  `wrangler secret put SPOTIFY_REFRESH_TOKEN`。
+- **撤銷 Spotify 授權：** 到 [Spotify 帳號授權應用程式清單](https://www.spotify.com/account/apps/) 移除該 app 的授權。之後要重新啟用，照
+  [每 6 個月重新授權](#每-6-個月重新授權) 的步驟做 — 包含刪除 KV 的那一步。

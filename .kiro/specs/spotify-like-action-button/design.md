@@ -154,6 +154,8 @@ export async function getAccessToken(env: Env): Promise<Result<string, Failure>>
 
 Spotify returns `400 invalid_grant` — not `401` — when a refresh token has been revoked, so the classifier treats a failed *token exchange* as an authentication failure for any 4xx, while a failed *data call* uses the plain status classes. That distinction is the one place where the call site affects the mapping.
 
+Refresh-token *expiry* (the 6-month lifetime described in the setup procedure) reaches the endpoint the same way revocation does: `400 invalid_grant`. So it lands on the existing `auth_failed` outcome and the existing "please re-authorize" message with nothing added, and the two causes need no distinguishing — the fix is the same authorization-code flow either way. The 4xx-means-auth rule for the exchange is what makes this work rather than luck: a `400` would otherwise be classified as a generic API failure and answered with "try again later", which is wrong advice for a grant that will never succeed again. A failed exchange also returns immediately rather than being retried, which is what Spotify's guidance for an expired token asks for: stop refreshing, discard the stored token, re-authorize.
+
 **Stale-token retry.** If a data call returns `401` while using a cached token, the Worker invalidates the cache, re-exchanges once, and retries the call once. A second `401` is reported as an authentication failure. The retry is capped at one attempt so a genuinely revoked authorization cannot produce a loop, and it is the reason the in-memory cache cannot cause a user-visible error.
 
 ### `spotify/player.ts` — reading playback
@@ -330,7 +332,7 @@ Language is threaded as an argument rather than held in module scope. A Worker i
 | Track added (new or already liked) | `added` | `已加入喜愛：<歌名> - <歌手>` (歌手 truncated to 28 display columns; 歌名 in full) | 1.3, 2.2 |
 | 204 / `item: null` / ad / unknown type | `nothing_playing` | `目前沒有播放中的歌曲` | 1.4 |
 | Playing item has no track id (local file, podcast episode) | `not_addable` | `目前播放的內容無法加入喜愛` | 1.5 |
-| Token exchange returns any 4xx (incl. `400 invalid_grant`) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
+| Token exchange returns any 4xx (incl. `400 invalid_grant` from a revoked *or expired* refresh token) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
 | Data call returns 401 or 403 (after one retry) | `auth_failed` | `Spotify 授權已失效，請重新取得授權` | 4.2 |
 | Any other Spotify status ≥ 400, including 429 and 5xx | `api_failed` | `操作未完成，請稍後再試` | 4.3 |
 | Response body is not the expected shape | `api_failed` | `操作未完成，請稍後再試` | 4.3 |
@@ -358,6 +360,8 @@ Language is threaded as an argument rather than held in module scope. A Worker i
 9. **Scopes are minimal.** Exactly the four scopes the flow needs. Notably absent is any playback-control scope, so a compromised token cannot start, stop, or redirect playback.
 
 ## One-Time Setup Procedure
+
+"One-time" holds for everything here except the authorization in step 2, which expires and has to be redone at least every 6 months (see step 4); registering the app, setting the secrets, and configuring the Shortcut are genuinely done once.
 
 ### 1. Register the Spotify application
 
@@ -390,7 +394,11 @@ curl -X POST https://accounts.spotify.com/api/token \
   -d redirect_uri=http://127.0.0.1:8787/callback
 ```
 
-4. Save the `refresh_token` from the response. It does not expire; it is invalidated only by revoking the app's access or changing the account password. The `access_token` in the same response can be discarded — the Worker mints its own.
+4. Save the `refresh_token` from the response. The `access_token` in the same response can be discarded — the Worker mints its own.
+
+**The refresh token expires after 6 months.** Spotify announced this on 2026-06-18: refresh tokens issued to apps registered in the Developer Dashboard now have a 6-month lifetime, effective immediately for newly registered apps and from 2026-07-20 for existing ones. The clock starts when the account authorizes the app and is **not** reset or extended by refreshing — the Worker exchanging an access token every hour keeps itself running but does nothing for the underlying grant. Revoking the app's access or changing the account password still invalidates the token earlier than that. Re-authorizing (repeating this step) starts a fresh 6-month window, and previously granted scopes carry over as long as the same four are requested. Refresh tokens carry no issuance timestamp, so anticipating the expiry means recording the authorization date somewhere yourself.
+
+The change applies to the user-authorized flows — Authorization Code, which this design uses, and Authorization Code with PKCE — and not to Client Credentials. Sources: `developer.spotify.com/blog/2026-06-18-refresh-token-expiration` and the *Refreshing tokens* tutorial at `developer.spotify.com/documentation/web-api/tutorials/refreshing-tokens`; both are rephrased rather than quoted here, for licensing compliance.
 
 Scopes cannot be widened later without repeating this flow, which is why all four are requested now even though the library-read scope is only used by the optional probe.
 
@@ -404,6 +412,15 @@ wrangler secret put SHORTCUT_SECRET      # openssl rand -base64 32
 ```
 
 Then `wrangler deploy` and note the Worker URL. For local runs, put the same four keys in `.dev.vars` (git-ignored) and use `wrangler dev`.
+
+**Re-authorizing after the 6-month expiry takes more than `wrangler secret put`.** The token-rotation feature makes the Worker prefer a rotated refresh token held in KV over the Secret: `readEffectiveRefreshToken` in `src/spotify/token.ts` reads `TOKEN_KV` key `refresh_token` first and falls back to `SPOTIFY_REFRESH_TOKEN` only when that read yields nothing or fails. A rotated token inherits the original authorization's 6-month lifetime rather than opening a new window, so when the authorization expires the KV value is expired too — and it still wins. Putting a freshly authorized token in the Secret therefore has no effect on its own: the stale KV entry keeps taking precedence and every press keeps answering `Spotify 授權已失效，請重新取得授權`. Recovery currently requires clearing the KV key as well:
+
+```bash
+wrangler kv key delete refresh_token --binding TOKEN_KV --remote
+wrangler secret put SPOTIFY_REFRESH_TOKEN
+```
+
+This is a known operational trap of the current design rather than a solved problem. Nothing in the code detects that a stored rotated token is expired, and nothing prefers a newer Secret over an older KV value; the ordering that makes rotation work is the same ordering that makes recovery non-obvious. It is recorded here so the extra step is not rediscovered with the button already broken.
 
 The notification language is optional and is *not* a secret. It goes in `wrangler.toml`:
 
