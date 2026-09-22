@@ -20,13 +20,13 @@
     "fast-check": "^4.10.2",
     "typescript": "^5.6.3",
     "vitest": "^4.1.11",
-    "wrangler": "^4.135.0"
+    "wrangler": "^4.136.1"
   },
   "allowScripts": {
     "fsevents@2.3.3": true,
     "sharp@0.35.4": true,
     "workerd@1.20260815.1": true,
-    "workerd@1.20260918.1": true,
+    "workerd@1.20260921.1": true,
     "esbuild@0.28.1": true
   }
 }
